@@ -33,6 +33,7 @@ final class SystemModel {
 
     private(set) var state: State = .unknown
     private(set) var isBusy = false
+    private(set) var statusHint: String?
     private(set) var actionError: String?
 
     var isRunning: Bool {
@@ -68,17 +69,19 @@ final class SystemModel {
         }
     }
 
-    /// Start the system silently (kernel install disabled). On failure, surface a
-    /// hint pointing at the kernel, the most likely cause on a fresh setup.
+    /// Start the system silently. The kernel is installed automatically on
+    /// first run; subsequent starts skip the download when a kernel already
+    /// exists. On failure, surface the error details.
     func startSystem() async {
         isBusy = true
         actionError = nil
-        defer { isBusy = false }
+        statusHint = TerminalLauncher.isKernelInstalled ? nil : "Downloading kernel…"
+        defer { isBusy = false; statusHint = nil }
         do {
             try await Task.detached { try TerminalLauncher.startSystem() }.value
         } catch {
             actionError =
-                "Failed to start the system. If this is a fresh setup, install the kernel first with `container system kernel set --recommended`.\n\(error.localizedDescription)"
+                "Failed to start the system.\n\(error.localizedDescription)"
         }
         await ping()
     }
@@ -86,7 +89,8 @@ final class SystemModel {
     func stopSystem() async {
         isBusy = true
         actionError = nil
-        defer { isBusy = false }
+        statusHint = nil
+        defer { isBusy = false; statusHint = nil }
         do {
             try await Task.detached { try TerminalLauncher.stopSystem() }.value
         } catch {

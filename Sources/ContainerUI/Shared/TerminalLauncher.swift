@@ -48,11 +48,24 @@ enum TerminalLauncher {
         FileManager.default.isExecutableFile(atPath: containerBinary)
     }
 
+    /// Whether a default kernel is already provisioned. Checks the well-known
+    /// symlink under the container app-support directory so the GUI can decide
+    /// whether the first start will trigger a kernel download.
+    static var isKernelInstalled: Bool {
+        let appRoot = ProcessInfo.processInfo.environment["CONTAINER_APP_ROOT"]
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                .appendingPathComponent("com.apple.container").path
+        let arch = "arm64"
+        let kernelPath = (appRoot as NSString).appendingPathComponent("kernels/default.kernel-\(arch)")
+        return FileManager.default.fileExists(atPath: kernelPath)
+    }
+
     /// Start the container system silently (no Terminal). Kernel install is
-    /// disabled — the kernel is provisioned at install time, so day-to-day starts
-    /// never need it and stay non-interactive. Throws with stderr on failure.
+    /// enabled so that first-time setups automatically download the kernel.
+    /// On subsequent starts the upstream CLI skips the download if a kernel
+    /// already exists. Throws with stderr on failure.
     static func startSystem() throws {
-        try runSilently([containerBinary, "system", "start", "--disable-kernel-install"])
+        try runSilently([containerBinary, "system", "start", "--enable-kernel-install"])
     }
 
     /// Stop the container system silently (no Terminal).

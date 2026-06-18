@@ -33,10 +33,10 @@ struct SystemStatusBar: View {
 
     private var label: String {
         switch system.state {
-        case .running: "System running"
-        case .unavailable: "System not running"
-        case .notInstalled: "Not installed"
-        case .unknown: "Checking…"
+        case .running: return "System running"
+        case .unavailable: return "System not running"
+        case .notInstalled: return "Not installed"
+        case .unknown: return "Checking…"
         }
     }
 
@@ -127,7 +127,14 @@ struct SystemUnavailableOverlay: View {
                     Task { await system.startSystem() }
                 } label: {
                     if system.isBusy {
-                        ProgressView().controlSize(.small)
+                        VStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            if let hint = system.statusHint {
+                                Text(hint)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     } else {
                         Text("Start System")
                     }
