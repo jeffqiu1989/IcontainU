@@ -31,6 +31,7 @@ import SwiftUI
 struct ContainerCard: View {
     let container: ContainerSnapshot
     let isSelected: Bool
+    let isBusy: Bool
     let onSelect: () -> Void
     let onStart: () -> Void
     let onStop: () -> Void
@@ -79,6 +80,15 @@ struct ContainerCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Palette.cardBorder, lineWidth: isSelected ? 3 : 1)
         }
+        .overlay {
+            if isBusy {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.background.opacity(0.7))
+                ProgressView()
+                    .controlSize(.regular)
+            }
+        }
+        .disabled(isBusy)
         .shadow(
             color: .black.opacity(isSelected ? 0.24 : (hovering ? 0.10 : 0.03)),
             radius: isSelected ? 12 : (hovering ? 5 : 2), y: isSelected ? 3 : 1
@@ -245,8 +255,14 @@ struct ContainerCard: View {
             if isEmpty {
                 Text(emptyText)
                     .font(.callout)
-                    .foregroundStyle(Color.secondary.opacity(0.7))
-                    .padding(.top, 3)
+                    .foregroundStyle(Color.secondary.opacity(0.5))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7)
+                            .strokeBorder(Color.secondary.opacity(0.2), style: StrokeStyle(dash: [4, 3]))
+                    }
                 Spacer(minLength: 0)
             } else {
                 content()
@@ -300,12 +316,12 @@ struct ContainerCard: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Spacer()
-            actionButton(icon: "play.fill", tint: .green, help: "Start", disabled: isRunning, action: onStart)
-            actionButton(icon: "stop.fill", tint: .orange, help: "Stop", disabled: !isRunning, action: onStop)
+            actionButton(icon: "play.fill", tint: .green, help: "Start", disabled: isRunning || isBusy, action: onStart)
+            actionButton(icon: "stop.fill", tint: .orange, help: "Stop", disabled: !isRunning || isBusy, action: onStop)
             actionButton(
-                icon: "terminal", tint: .blue, help: "Open shell", disabled: !isRunning, action: onExec)
-            actionButton(icon: "doc.text", tint: .indigo, help: "Logs", disabled: false, action: onLogs)
-            actionButton(icon: "trash", tint: .red, help: "Delete", disabled: false, action: onDelete)
+                icon: "terminal", tint: .blue, help: "Open shell", disabled: !isRunning || isBusy, action: onExec)
+            actionButton(icon: "doc.text", tint: .indigo, help: "Logs", disabled: isBusy, action: onLogs)
+            actionButton(icon: "trash", tint: .red, help: "Delete", disabled: isBusy, action: onDelete)
         }
         .padding(.top, 2)
     }

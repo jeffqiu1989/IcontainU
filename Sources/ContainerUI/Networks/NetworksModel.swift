@@ -24,7 +24,10 @@ import Observation
 @MainActor
 final class NetworksModel {
     private(set) var networks: [NetworkResource] = []
-    private(set) var errorMessage: String?
+    private(set) var pollError: String?
+    private(set) var lastError: OperationError?
+
+    func clearError() { lastError = nil }
 
     private let client = NetworkClient()
 
@@ -41,15 +44,16 @@ final class NetworksModel {
     func refresh() async {
         do {
             networks = try await client.list().sorted { $0.id < $1.id }
-            errorMessage = nil
+            pollError = nil
         } catch {
-            errorMessage = error.localizedDescription
+            pollError = error.localizedDescription
         }
     }
 
     func create(name: String, hostOnly: Bool, subnet: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+        lastError = nil
         do {
             // A blank subnet lets the plugin auto-allocate. A non-empty value is
             // validated by constructing a CIDRv4, which throws on bad input — the
@@ -64,16 +68,17 @@ final class NetworksModel {
             _ = try await client.create(configuration: config)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "创建网络失败", detail: error.localizedDescription)
         }
     }
 
     func delete(_ network: NetworkResource) async {
+        lastError = nil
         do {
             try await client.delete(id: network.id)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "删除网络失败", detail: error.localizedDescription)
         }
     }
 }

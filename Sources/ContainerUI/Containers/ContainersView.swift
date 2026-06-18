@@ -18,7 +18,7 @@ import ContainerResource
 import SwiftUI
 
 struct ContainersView: View {
-    @State private var model = ContainersModel()
+    @Environment(ContainersModel.self) private var model
     @State private var pendingDelete: ContainerSnapshot?
     @State private var searchText = ""
     @State private var selectedID: ContainerSnapshot.ID?
@@ -42,11 +42,14 @@ struct ContainersView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = model.errorMessage {
-                ErrorBanner(message: error)
-            }
             if let progress = model.creating {
-                createProgressBar(progress)
+                InlineProgressBar(progress: progress, accent: Palette.containers)
+            }
+            if let error = model.lastError {
+                ErrorBanner(
+                    error: error,
+                    onCopy: { showCopyToast() },
+                    onDismiss: { model.clearError() })
             }
             cardGrid
         }
@@ -138,27 +141,6 @@ struct ContainersView: View {
     }
 
     @ViewBuilder
-    private func createProgressBar(_ progress: ContainersModel.CreateProgress) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(progress.description)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            if let fraction = progress.fraction {
-                ProgressView(value: fraction)
-            } else {
-                ProgressView()
-                    .progressViewStyle(.linear)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
-    }
-
-    @ViewBuilder
     private var cardGrid: some View {
         if model.containers.isEmpty {
             ContentUnavailableView("No Containers", systemImage: "shippingbox")
@@ -178,6 +160,7 @@ struct ContainersView: View {
                         ContainerCard(
                             container: container,
                             isSelected: selectedID == container.id,
+                            isBusy: model.busyItemIDs.contains(container.id),
                             onSelect: {
                                 selectedID = (selectedID == container.id) ? nil : container.id
                             },

@@ -18,7 +18,7 @@ import ContainerResource
 import SwiftUI
 
 struct VolumesView: View {
-    @State private var model = VolumesModel()
+    @Environment(VolumesModel.self) private var model
     @State private var searchText = ""
     @State private var selectedID: VolumeConfiguration.ID?
     @State private var pendingDelete: VolumeConfiguration?
@@ -32,8 +32,8 @@ struct VolumesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = model.errorMessage {
-                ErrorBanner(message: error)
+            if let error = model.lastError {
+                ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
             cardGrid
         }

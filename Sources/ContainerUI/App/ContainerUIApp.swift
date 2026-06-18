@@ -20,6 +20,14 @@ import SwiftUI
 @main
 struct ContainerUIApp: App {
     @State private var systemModel = SystemModel()
+    // Owned at app scope so their state (in-flight progress, errors) survives tab
+    // switches — a tab's view is torn down when you navigate away, but the model
+    // must not be, or a running pull/create and its progress would vanish.
+    @State private var containersModel = ContainersModel()
+    @State private var imagesModel = ImagesModel()
+    @State private var machinesModel = MachinesModel()
+    @State private var networksModel = NetworksModel()
+    @State private var volumesModel = VolumesModel()
 
     init() {
         // Route swift-log to stderr so `swift run container-ui` shows the full
@@ -43,6 +51,11 @@ struct ContainerUIApp: App {
         WindowGroup {
             RootView()
                 .environment(systemModel)
+                .environment(containersModel)
+                .environment(imagesModel)
+                .environment(machinesModel)
+                .environment(networksModel)
+                .environment(volumesModel)
                 .frame(minWidth: 900, minHeight: 540)
         }
         .windowResizability(.contentMinSize)

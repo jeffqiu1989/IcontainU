@@ -24,21 +24,15 @@ import TerminalProgress
 @Observable
 @MainActor
 final class ContainersModel {
-    /// Progress of an in-flight container creation (image fetch + unpack).
-    struct CreateProgress {
-        var description: String = "Preparing…"
-        var currentSize: Int64 = 0
-        var totalSize: Int64 = 0
-
-        var fraction: Double? {
-            guard totalSize > 0 else { return nil }
-            return min(1.0, Double(currentSize) / Double(totalSize))
-        }
-    }
-
     private(set) var containers: [ContainerSnapshot] = []
-    private(set) var errorMessage: String?
-    private(set) var creating: CreateProgress?
+    /// Transient list-fetch failure: managed entirely by `refresh`.
+    private(set) var pollError: String?
+    /// Failure (or notice) from an explicit action: never cleared by polling.
+    private(set) var lastError: OperationError?
+    private(set) var creating: OperationProgress?
+    private(set) var busyItemIDs: Set<String> = []
+
+    func clearError() { lastError = nil }
 
     /// Resources offered in the create form's volume / network pickers.
     private(set) var availableVolumes: [VolumeConfiguration] = []
@@ -61,47 +55,57 @@ final class ContainersModel {
             // are containers under the hood but managed in their own tab.
             let filters = ContainerListFilters.all.withoutMachines()
             containers = try await client.list(filters: filters)
-            errorMessage = nil
+            pollError = nil
         } catch {
-            errorMessage = error.localizedDescription
+            pollError = error.localizedDescription
         }
     }
 
     /// Detached start: bootstrap with no stdio attached, then start the process.
     func start(_ container: ContainerSnapshot) async {
+        lastError = nil
+        busyItemIDs.insert(container.id)
+        defer { busyItemIDs.remove(container.id) }
         do {
             let process = try await client.bootstrap(id: container.id, stdio: [nil, nil, nil])
             try await process.start()
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "启动容器失败", detail: error.localizedDescription)
         }
     }
 
     func stop(_ container: ContainerSnapshot) async {
+        lastError = nil
+        busyItemIDs.insert(container.id)
+        defer { busyItemIDs.remove(container.id) }
         do {
             try await client.stop(id: container.id)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "停止容器失败", detail: error.localizedDescription)
         }
     }
 
     func delete(_ container: ContainerSnapshot, force: Bool) async {
+        lastError = nil
+        busyItemIDs.insert(container.id)
+        defer { busyItemIDs.remove(container.id) }
         do {
             try await client.delete(id: container.id, force: force)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "删除容器失败", detail: error.localizedDescription)
         }
     }
 
     /// Open an interactive shell in the container via the system Terminal.
     func openShell(_ container: ContainerSnapshot) {
+        lastError = nil
         do {
             try TerminalLauncher.execInContainer(id: container.id)
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "打开终端失败", detail: error.localizedDescription)
         }
     }
 
@@ -118,7 +122,7 @@ final class ContainersModel {
             let metadata = try await ImageInspector.analyze(image: img, platform: platform)
             return metadata
         } catch {
-            errorMessage = "Image analysis failed: \(error.localizedDescription)"
+            lastError = OperationError(title: "镜像分析失败", detail: error.localizedDescription)
             return ImageMetadata()
         }
     }
@@ -132,16 +136,37 @@ final class ContainersModel {
         availableNetworks = await networks ?? []
     }
 
+    /// Create + start a container. Image fetch and container prepare are run as
+    /// two coordinated phases (see `pullImage` for the rationale): late events
+    /// from the finished fetch phase are dropped instead of disturbing the
+    /// prepare bar, and each phase is labeled explicitly.
     func create(spec: ContainerCreateSpec) async {
-        creating = CreateProgress()
+        lastError = nil
+        creating = OperationProgress()
         defer { creating = nil }
+
+        let coordinator = ProgressTaskCoordinator()
         do {
-            let id = try await ContainerCreateEngine.create(spec: spec, progressUpdate: progressHandler)
+            let id = try await ContainerCreateEngine.create(spec: spec) { [weak self] label in
+                await self?.beginCreatePhase(label, coordinator: coordinator) ?? { _ in }
+            }
+            await coordinator.finish()
             await refresh()
             await reportIfStopped(id: id)
         } catch {
-            errorMessage = error.localizedDescription
+            await coordinator.finish()
+            lastError = OperationError(title: "创建容器失败", detail: error.localizedDescription)
         }
+    }
+
+    /// Open a new coordinator task for a create phase, relabel the progress, and
+    /// return a handler that only forwards while this phase is current.
+    private func beginCreatePhase(
+        _ label: String, coordinator: ProgressTaskCoordinator
+    ) async -> ProgressUpdateHandler {
+        let task = await coordinator.startTask()
+        creating?.beginPhase(label)
+        return ProgressTaskCoordinator.handler(for: task, from: progressHandler)
     }
 
     /// A freshly created container may already be stopped — and that is not
@@ -154,9 +179,10 @@ final class ContainersModel {
         await refresh()
         guard let container = containers.first(where: { $0.id == id }) else { return }
         if container.status == .stopped {
-            errorMessage =
-                "Container \"\(id)\" has already stopped. "
-                + "If that wasn't expected, open it and check the Logs tab."
+            lastError = OperationError(
+                title: "容器已停止",
+                detail: "Container \"\(id)\" has already stopped. "
+                    + "If that wasn't expected, open it and check the Logs tab.")
         }
     }
 
@@ -168,16 +194,6 @@ final class ContainersModel {
 
     private func applyProgress(_ events: [ProgressUpdateEvent]) {
         guard creating != nil else { return }
-        for event in events {
-            switch event {
-            case .setDescription(let value), .setSubDescription(let value):
-                creating?.description = value
-            case .setTotalSize(let value): creating?.totalSize = value
-            case .addTotalSize(let value): creating?.totalSize += value
-            case .setSize(let value): creating?.currentSize = value
-            case .addSize(let value): creating?.currentSize += value
-            default: break
-            }
-        }
+        creating?.apply(events)
     }
 }

@@ -19,7 +19,7 @@ import MachineAPIClient
 import SwiftUI
 
 struct MachinesView: View {
-    @State private var model = MachinesModel()
+    @Environment(MachinesModel.self) private var model
     @State private var searchText = ""
     @State private var selectedID: MachineSnapshot.ID?
     @State private var pendingDelete: MachineSnapshot?
@@ -33,11 +33,11 @@ struct MachinesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = model.errorMessage {
-                ErrorBanner(message: error)
-            }
             if let creating = model.creating {
-                MachineCreateProgressBar(progress: creating)
+                InlineProgressBar(progress: creating, accent: Palette.machines)
+            }
+            if let error = model.lastError {
+                ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
             cardGrid
         }
@@ -120,36 +120,6 @@ struct MachinesView: View {
                 .padding(16)
             }
         }
-    }
-}
-
-/// Inline progress shown during machine creation (image fetch + unpack).
-private struct MachineCreateProgressBar: View {
-    let progress: MachinesModel.CreateProgress
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(progress.description)
-                    .font(.callout)
-                Spacer()
-                if progress.totalSize > 0 {
-                    Text(
-                        "\(ByteCountFormatter.string(fromByteCount: progress.currentSize, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: progress.totalSize, countStyle: .file))"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            if let fraction = progress.fraction {
-                ProgressView(value: fraction)
-            } else {
-                ProgressView().progressViewStyle(.linear)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.5))
     }
 }
 

@@ -23,7 +23,10 @@ import Observation
 @MainActor
 final class VolumesModel {
     private(set) var volumes: [VolumeConfiguration] = []
-    private(set) var errorMessage: String?
+    private(set) var pollError: String?
+    private(set) var lastError: OperationError?
+
+    func clearError() { lastError = nil }
 
     func startPolling() async {
         while !Task.isCancelled {
@@ -35,15 +38,16 @@ final class VolumesModel {
     func refresh() async {
         do {
             volumes = try await ClientVolume.list().sorted { $0.name < $1.name }
-            errorMessage = nil
+            pollError = nil
         } catch {
-            errorMessage = error.localizedDescription
+            pollError = error.localizedDescription
         }
     }
 
     func create(name: String, size: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+        lastError = nil
         do {
             // A blank size uses the server default (512GB). A non-empty value is
             // passed through driverOpts["size"], mirroring the CLI's `--size`; the
@@ -53,16 +57,17 @@ final class VolumesModel {
             _ = try await ClientVolume.create(name: trimmed, driverOpts: driverOpts)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "创建卷失败", detail: error.localizedDescription)
         }
     }
 
     func delete(_ volume: VolumeConfiguration) async {
+        lastError = nil
         do {
             try await ClientVolume.delete(name: volume.name)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "删除卷失败", detail: error.localizedDescription)
         }
     }
 }

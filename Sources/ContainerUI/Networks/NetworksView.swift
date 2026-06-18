@@ -18,7 +18,7 @@ import ContainerResource
 import SwiftUI
 
 struct NetworksView: View {
-    @State private var model = NetworksModel()
+    @Environment(NetworksModel.self) private var model
     @State private var searchText = ""
     @State private var selectedID: NetworkResource.ID?
     @State private var pendingDelete: NetworkResource?
@@ -32,8 +32,8 @@ struct NetworksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = model.errorMessage {
-                ErrorBanner(message: error)
+            if let error = model.lastError {
+                ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
             cardGrid
         }

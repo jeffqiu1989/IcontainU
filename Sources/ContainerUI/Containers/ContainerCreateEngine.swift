@@ -31,9 +31,14 @@ enum ContainerCreateEngine {
     private static let log = Logger(label: "container-ui.create")
 
     /// Build, create, and start the container. Returns the resulting container id.
+    ///
+    /// `beginPhase` is invoked at each progress phase boundary with a label; it
+    /// returns the handler to use for that phase. This lets the caller relabel
+    /// the UI and coordinate phases (dropping stale events) without the engine
+    /// knowing about UI state.
     static func create(
         spec: ContainerCreateSpec,
-        progressUpdate: @escaping ProgressUpdateHandler
+        beginPhase: @Sendable (String) async -> ProgressUpdateHandler
     ) async throws -> String {
         let config = try await SystemConfig.load()
         let client = ContainerClient()
@@ -70,11 +75,12 @@ enum ContainerCreateEngine {
         // containerConfigFromFlags finds the (mirror-free) image locally.
         let platform = try? Platform(from: "linux/\(Arch.hostArchitecture().rawValue)")
         log.debug("pre-pulling image via mirror store", metadata: ["reference": "\(spec.image)"])
+        let fetchHandler = await beginPhase("Fetching image…")
         let image = try await MirrorPull.pull(
             originalReference: spec.image,
             platform: platform,
             config: config,
-            progressUpdate: progressUpdate)
+            progressUpdate: fetchHandler)
         log.debug("image ready", metadata: ["reference": "\(image.reference)"])
 
         let flags = makeFlags(spec: spec)
@@ -93,6 +99,7 @@ enum ContainerCreateEngine {
         // A non-empty command is passed as arguments: appended to the entrypoint
         // if the image has one, otherwise it is the command to run — standard
         // Docker/OCI semantics, handled server-side by Parser.process.
+        let prepareHandler = await beginPhase("Preparing container…")
         let (containerConfig, kernel, initImage) = try await Utility.containerConfigFromFlags(
             id: id,
             image: image.reference,
@@ -103,7 +110,7 @@ enum ContainerCreateEngine {
             registry: flags.registry,
             imageFetch: flags.imageFetch,
             containerSystemConfig: config,
-            progressUpdate: progressUpdate,
+            progressUpdate: prepareHandler,
             log: log)
 
         let options = ContainerCreateOptions(autoRemove: spec.autoRemove)

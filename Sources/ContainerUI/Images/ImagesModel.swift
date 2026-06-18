@@ -24,21 +24,14 @@ import TerminalProgress
 @Observable
 @MainActor
 final class ImagesModel {
-    /// Progress of an in-flight pull, surfaced to the UI.
-    struct PullProgress {
-        var description: String = "Preparing…"
-        var currentSize: Int64 = 0
-        var totalSize: Int64 = 0
-
-        var fraction: Double? {
-            guard totalSize > 0 else { return nil }
-            return min(1.0, Double(currentSize) / Double(totalSize))
-        }
-    }
-
     private(set) var images: [ContainerImage] = []
-    private(set) var errorMessage: String?
-    private(set) var pull: PullProgress?
+    /// Transient list-fetch failure: managed entirely by `refresh`.
+    private(set) var pollError: String?
+    /// Failure of an explicit action (pull/delete): never cleared by polling.
+    private(set) var lastError: OperationError?
+    private(set) var pull: OperationProgress?
+
+    func clearError() { lastError = nil }
 
     /// Images grouped by repository for the card grid — one card per repository,
     /// each listing its tags. Computed on demand from `images`.
@@ -67,13 +60,14 @@ final class ImagesModel {
                 resources.append(try await image.toImageResource(containerSystemConfig: config))
             }
             images = resources.sorted { $0.displayReference < $1.displayReference }
-            errorMessage = nil
+            pollError = nil
         } catch {
-            errorMessage = error.localizedDescription
+            pollError = error.localizedDescription
         }
     }
 
     func delete(_ image: ContainerImage) async {
+        lastError = nil
         do {
             // Delete by the full reference (e.g. docker.io/library/nginx:latest),
             // not the shortened displayReference — the backend matches the stored
@@ -81,7 +75,8 @@ final class ImagesModel {
             try await ClientImage.delete(reference: image.name, garbageCollect: true)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(
+                title: "删除镜像失败", detail: error.localizedDescription)
         }
     }
 
@@ -93,63 +88,60 @@ final class ImagesModel {
     }
 
     /// Pulls a reference and unpacks it (matching the CLI), reporting progress.
+    ///
+    /// Fetch and unpack are coordinated as two distinct phases: a
+    /// `ProgressTaskCoordinator` makes the fetch task non-current the instant
+    /// unpack begins, so any late fetch events are dropped instead of bumping
+    /// the unpack bar — the same technique the CLI uses to keep progress stable.
     func pullImage(reference: String) async {
         let trimmed = reference.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
+        lastError = nil
         let platform = currentLinuxPlatform
         let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
 
-        pull = PullProgress()
-        if viaMirror {
-            pull?.description = "Pulling via mirror…"
-        }
+        var progress = OperationProgress()
+        progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
+        pull = progress
         defer { pull = nil }
+
+        let coordinator = ProgressTaskCoordinator()
+        defer { Task { await coordinator.finish() } }
 
         do {
             let config = try await SystemConfig.load()
             // Pull through any configured mirror, then retag to the canonical
             // reference so the local image is mirror-free.
+            let fetchTask = await coordinator.startTask()
             let image = try await MirrorPull.pull(
                 originalReference: trimmed,
                 platform: platform,
                 config: config,
-                progressUpdate: progressHandler)
-            pull?.description = "Unpacking…"
-            pull?.currentSize = 0
-            pull?.totalSize = 0
-            try await image.unpack(platform: platform, progressUpdate: progressHandler)
+                progressUpdate: ProgressTaskCoordinator.handler(for: fetchTask, from: progressHandler))
+
+            let unpackTask = await coordinator.startTask()
+            pull?.beginPhase("Unpacking…")
+            try await image.unpack(
+                platform: platform,
+                progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(
+                title: "拉取镜像失败", detail: error.localizedDescription)
         }
     }
 
-    /// Translates the progress event stream into the simple PullProgress state.
+    /// Folds the progress event stream into the shared `OperationProgress` state.
     private var progressHandler: ProgressUpdateHandler {
         { [weak self] events in
-            await self?.apply(events)
+            await self?.applyProgress(events)
         }
     }
 
-    private func apply(_ events: [ProgressUpdateEvent]) {
+    private func applyProgress(_ events: [ProgressUpdateEvent]) {
         guard pull != nil else { return }
-        for event in events {
-            switch event {
-            case .setDescription(let value), .setSubDescription(let value):
-                pull?.description = value
-            case .setTotalSize(let value):
-                pull?.totalSize = value
-            case .addTotalSize(let value):
-                pull?.totalSize += value
-            case .setSize(let value):
-                pull?.currentSize = value
-            case .addSize(let value):
-                pull?.currentSize += value
-            default:
-                break
-            }
-        }
+        pull?.apply(events)
     }
 }
 

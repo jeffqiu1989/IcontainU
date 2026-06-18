@@ -18,7 +18,7 @@ import ContainerResource
 import SwiftUI
 
 struct ImagesView: View {
-    @State private var model = ImagesModel()
+    @Environment(ImagesModel.self) private var model
     @State private var pendingDelete: ContainerImage?
     @State private var showPullSheet = false
     @State private var searchText = ""
@@ -37,11 +37,11 @@ struct ImagesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = model.errorMessage {
-                ErrorBanner(message: error)
-            }
             if let pull = model.pull {
-                PullProgressBar(progress: pull)
+                InlineProgressBar(progress: pull, accent: Palette.images)
+            }
+            if let error = model.lastError {
+                ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
             cardGrid
         }
@@ -107,37 +107,6 @@ struct ImagesView: View {
                 .padding(16)
             }
         }
-    }
-}
-
-/// Inline progress bar shown during a pull/unpack.
-private struct PullProgressBar: View {
-    let progress: ImagesModel.PullProgress
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(progress.description)
-                    .font(.callout)
-                Spacer()
-                if progress.totalSize > 0 {
-                    Text(
-                        "\(ByteCountFormatter.string(fromByteCount: progress.currentSize, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: progress.totalSize, countStyle: .file))"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            if let fraction = progress.fraction {
-                ProgressView(value: fraction)
-            } else {
-                ProgressView()
-                    .progressViewStyle(.linear)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.5))
     }
 }
 

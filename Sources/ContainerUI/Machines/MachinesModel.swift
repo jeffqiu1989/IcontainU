@@ -26,22 +26,15 @@ import TerminalProgress
 @Observable
 @MainActor
 final class MachinesModel {
-    /// Progress of an in-flight machine creation (image fetch + unpack).
-    struct CreateProgress {
-        var description: String = "Preparing…"
-        var currentSize: Int64 = 0
-        var totalSize: Int64 = 0
-
-        var fraction: Double? {
-            guard totalSize > 0 else { return nil }
-            return min(1.0, Double(currentSize) / Double(totalSize))
-        }
-    }
-
     private(set) var machines: [MachineSnapshot] = []
     private(set) var defaultID: String?
-    private(set) var errorMessage: String?
-    private(set) var creating: CreateProgress?
+    /// Transient list-fetch failure: managed entirely by `refresh`.
+    private(set) var pollError: String?
+    /// Failure of an explicit action: never cleared by polling.
+    private(set) var lastError: OperationError?
+    private(set) var creating: OperationProgress?
+
+    func clearError() { lastError = nil }
 
     private let client = MachineClient()
 
@@ -58,46 +51,50 @@ final class MachinesModel {
             async let def = client.getDefault()
             machines = try await list
             defaultID = try await def
-            errorMessage = nil
+            pollError = nil
         } catch {
-            errorMessage = error.localizedDescription
+            pollError = error.localizedDescription
         }
     }
 
     func boot(_ machine: MachineSnapshot) async {
+        lastError = nil
         do {
             _ = try await client.boot(id: machine.id)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "启动虚拟机失败", detail: error.localizedDescription)
         }
     }
 
     func stop(_ machine: MachineSnapshot) async {
+        lastError = nil
         do {
             try await client.stop(id: machine.id)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "停止虚拟机失败", detail: error.localizedDescription)
         }
     }
 
     /// Open an interactive shell in the machine via the system Terminal.
     /// `machine run` boots the machine first if it is stopped.
     func openShell(_ machine: MachineSnapshot) {
+        lastError = nil
         do {
             try TerminalLauncher.runInMachine(id: machine.id)
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "打开终端失败", detail: error.localizedDescription)
         }
     }
 
     func delete(_ machine: MachineSnapshot) async {
+        lastError = nil
         do {
             try await client.delete(id: machine.id)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "删除虚拟机失败", detail: error.localizedDescription)
         }
     }
 
@@ -117,8 +114,14 @@ final class MachinesModel {
         let trimmedImage = image.trimmingCharacters(in: .whitespaces)
         guard !trimmedImage.isEmpty else { return }
 
-        creating = CreateProgress()
+        lastError = nil
+        var progress = OperationProgress()
+        progress.beginPhase("Fetching image…")
+        creating = progress
         defer { creating = nil }
+
+        let coordinator = ProgressTaskCoordinator()
+        defer { Task { await coordinator.finish() } }
 
         do {
             let config = try await SystemConfig.load()
@@ -137,18 +140,19 @@ final class MachinesModel {
             )
 
             // Fetch the image (mirror-aware; retagged to canonical reference).
-            creating?.description = "Fetching image…"
+            let fetchTask = await coordinator.startTask()
             let img = try await MirrorPull.pull(
                 originalReference: trimmedImage,
                 platform: platform,
                 config: config,
-                progressUpdate: progressHandler)
+                progressUpdate: ProgressTaskCoordinator.handler(for: fetchTask, from: progressHandler))
 
             // Unpack into a create snapshot before use.
-            creating?.description = "Unpacking image…"
-            creating?.currentSize = 0
-            creating?.totalSize = 0
-            _ = try await img.getCreateSnapshot(platform: platform, progressUpdate: progressHandler)
+            let unpackTask = await coordinator.startTask()
+            creating?.beginPhase("Unpacking image…")
+            _ = try await img.getCreateSnapshot(
+                platform: platform,
+                progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
 
             // Determine the machine id (auto-derive from the canonical image when blank).
             let id = try machineID(name: name, image: img.reference)
@@ -174,7 +178,7 @@ final class MachinesModel {
             }
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            lastError = OperationError(title: "创建虚拟机失败", detail: error.localizedDescription)
         }
     }
 
@@ -198,16 +202,6 @@ final class MachinesModel {
 
     private func applyProgress(_ events: [ProgressUpdateEvent]) {
         guard creating != nil else { return }
-        for event in events {
-            switch event {
-            case .setDescription(let value), .setSubDescription(let value):
-                creating?.description = value
-            case .setTotalSize(let value): creating?.totalSize = value
-            case .addTotalSize(let value): creating?.totalSize += value
-            case .setSize(let value): creating?.currentSize = value
-            case .addSize(let value): creating?.currentSize += value
-            default: break
-            }
-        }
+        creating?.apply(events)
     }
 }
