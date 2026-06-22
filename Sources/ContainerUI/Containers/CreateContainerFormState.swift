@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import SwiftUI
 
 /// Editable row models for the dynamic sections.
@@ -99,9 +83,12 @@ final class CreateContainerFormState {
     /// like `container run <image> <args...>`). Never pre-filled from the image —
     /// keeping it empty avoids round-tripping a default through tokenization.
     var command = ""
-    var ports: [PortRow] = []
-    var envs: [EnvRow] = []
-    var mounts: [MountRow] = []
+    // Ports and envs always keep at least one (possibly empty) row so the inline
+    // `host : container  ⊖ ⊕` editor always shows a fillable row. Empty rows are
+    // dropped at `makeSpec` time via their `cliValue`.
+    var ports: [PortRow] = [PortRow()]
+    var envs: [EnvRow] = [EnvRow()]
+    var mounts: [MountRow] = [MountRow()]
     var networks: [NetworkRow] = [NetworkRow()]
     var autoRemove = false
     var ssh = false
@@ -113,18 +100,21 @@ final class CreateContainerFormState {
     /// default command, and baked-in env needs no user input.
     func apply(metadata: ImageMetadata) {
         // Ports: container port pre-filled, host left for the user.
-        ports = metadata.exposedPorts.map { spec in
+        let mappedPorts = metadata.exposedPorts.map { spec -> PortRow in
             let parts = spec.split(separator: "/")
             return PortRow(
                 hostPort: "",
                 containerPort: String(parts.first ?? ""),
                 proto: parts.count > 1 ? String(parts[1]) : "tcp")
         }
+        ports = mappedPorts.isEmpty ? [PortRow()] : mappedPorts
         // Env: only the vars the entrypoint script expects the user to set
         // (e.g. MYSQL_ROOT_PASSWORD), keyed with empty values to fill in.
-        envs = metadata.userEnv.map { EnvRow(key: $0, value: "") }
+        let mappedEnvs = metadata.userEnv.map { EnvRow(key: $0, value: "") }
+        envs = mappedEnvs.isEmpty ? [EnvRow()] : mappedEnvs
         // Volumes: container path pre-filled from VOLUME, source left for the user.
-        mounts = metadata.volumes.map { MountRow(kind: .volume, source: "", containerPath: $0) }
+        let mappedMounts = metadata.volumes.map { MountRow(kind: .volume, source: "", containerPath: $0) }
+        mounts = mappedMounts.isEmpty ? [MountRow()] : mappedMounts
     }
 
     /// Build the spec for the create engine.

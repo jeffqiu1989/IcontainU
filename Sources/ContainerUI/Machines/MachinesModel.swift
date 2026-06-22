@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerAPIClient
 import ContainerPersistence
 import ContainerizationError
@@ -36,7 +20,10 @@ final class MachinesModel {
 
     func clearError() { lastError = nil }
 
-    private let client = MachineClient()
+    // Fresh client per use so a restarted apiserver is reconnected automatically;
+    // a cached XPC connection goes invalid across apiserver restarts. See
+    // ContainersModel for the full rationale.
+    private var client: MachineClient { MachineClient() }
 
     func startPolling() async {
         while !Task.isCancelled {
@@ -63,7 +50,7 @@ final class MachinesModel {
             _ = try await client.boot(id: machine.id)
             await refresh()
         } catch {
-            lastError = OperationError(title: "启动虚拟机失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to start machine", detail: error.localizedDescription)
         }
     }
 
@@ -73,7 +60,7 @@ final class MachinesModel {
             try await client.stop(id: machine.id)
             await refresh()
         } catch {
-            lastError = OperationError(title: "停止虚拟机失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to stop machine", detail: error.localizedDescription)
         }
     }
 
@@ -84,7 +71,7 @@ final class MachinesModel {
         do {
             try TerminalLauncher.runInMachine(id: machine.id)
         } catch {
-            lastError = OperationError(title: "打开终端失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to open Terminal", detail: error.localizedDescription)
         }
     }
 
@@ -94,7 +81,7 @@ final class MachinesModel {
             try await client.delete(id: machine.id)
             await refresh()
         } catch {
-            lastError = OperationError(title: "删除虚拟机失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to delete machine", detail: error.localizedDescription)
         }
     }
 
@@ -178,7 +165,7 @@ final class MachinesModel {
             }
             await refresh()
         } catch {
-            lastError = OperationError(title: "创建虚拟机失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to create machine", detail: error.localizedDescription)
         }
     }
 

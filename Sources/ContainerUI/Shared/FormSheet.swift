@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import SwiftUI
 
 /// The standard modal form scaffold for every create / add / pull sheet.
@@ -49,7 +33,7 @@ struct FormSheet<Body: View, Footer: View>: View {
             header
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 16) {
                     content()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,11 +84,11 @@ struct LabeledSection<Content: View, Accessory: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(label)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.secondary)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.primary.opacity(0.85))
                 .frame(width: Self.labelWidth, alignment: .leading)
                 .padding(.top, 4)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 if Accessory.self != EmptyView.self {
                     HStack {
                         Spacer(minLength: 0)

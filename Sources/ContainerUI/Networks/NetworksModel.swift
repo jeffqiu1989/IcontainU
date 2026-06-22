@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerAPIClient
 import ContainerResource
 import ContainerizationExtras
@@ -29,7 +13,10 @@ final class NetworksModel {
 
     func clearError() { lastError = nil }
 
-    private let client = NetworkClient()
+    // Fresh client per use so a restarted apiserver is reconnected automatically;
+    // a cached XPC connection goes invalid across apiserver restarts. See
+    // ContainersModel for the full rationale.
+    private var client: NetworkClient { NetworkClient() }
 
     /// Default plugin used by the CLI for `network create`.
     private static let defaultPlugin = "container-network-vmnet"
@@ -68,7 +55,7 @@ final class NetworksModel {
             _ = try await client.create(configuration: config)
             await refresh()
         } catch {
-            lastError = OperationError(title: "创建网络失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to create network", detail: error.localizedDescription)
         }
     }
 
@@ -78,7 +65,7 @@ final class NetworksModel {
             try await client.delete(id: network.id)
             await refresh()
         } catch {
-            lastError = OperationError(title: "删除网络失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to delete network", detail: error.localizedDescription)
         }
     }
 }

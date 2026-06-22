@@ -1,0 +1,32 @@
+IcontainU
+Copyright 2026 The IcontainU authors
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this software except in compliance with the License. You may obtain a copy of
+the License at:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+Third-party software
+================================================================================
+
+IcontainU is a graphical front-end for Apple's `container` and does not bundle a
+container runtime. It builds on, links against, and interoperates with the
+following projects. Portions of IcontainU adapt patterns and behaviors from
+Apple's `container` command-line interface.
+
+- Apple container
+  https://github.com/apple/container
+  Copyright © Apple Inc. and the container project authors.
+  Licensed under the Apache License, Version 2.0.
+
+- Apple Containerization
+  https://github.com/apple/containerization
+  Copyright © Apple Inc. and the container project authors.
+  Licensed under the Apache License, Version 2.0.
+
+- Swift Log (apple/swift-log)
+  https://github.com/apple/swift-log
+  Copyright © The Swift Log project authors.
+  Licensed under the Apache License, Version 2.0.

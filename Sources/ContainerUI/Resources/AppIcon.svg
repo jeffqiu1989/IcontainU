@@ -1,0 +1,50 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="box" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2BA2EF"/><stop offset="1" stop-color="#1266BE"/>
+    </linearGradient>
+    <clipPath id="round"><rect x="0" y="0" width="1024" height="1024" rx="230" ry="230"/></clipPath>
+    <pattern id="corr" width="58" height="24" patternUnits="userSpaceOnUse">
+      <rect x="0" width="4" height="24" fill="#0A4E92" opacity="0.45"/>
+      <rect x="29" width="4" height="24" fill="#FFFFFF" opacity="0.10"/>
+    </pattern>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230" fill="url(#box)"/>
+  <g clip-path="url(#round)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#corr)"/>
+    <rect x="0" y="120" width="1024" height="20" fill="#0C5299" opacity="0.40"/>
+    <rect x="0" y="884" width="1024" height="20" fill="#0C5299" opacity="0.40"/>
+  </g>
+  <g fill="#0B4E92" opacity="0.55">
+    <rect x="86" y="86" width="132" height="96" rx="18"/>
+    <rect x="806" y="86" width="132" height="96" rx="18"/>
+    <rect x="86" y="842" width="132" height="96" rx="18"/>
+    <rect x="806" y="842" width="132" height="96" rx="18"/>
+  </g>
+
+  <!-- wide terminal screen -->
+  <rect x="180" y="290" width="664" height="444" rx="34" fill="#02120A" fill-opacity="0.62"/>
+
+  <g fill="none" stroke="#3CEB78" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <!-- [ wide -->
+    <path d="M 272 312 L 212 312 L 212 712 L 272 712"/>
+    <!-- ] wide -->
+    <path d="M 752 312 L 812 312 L 812 712 L 752 712"/>
+
+    <!-- apple from two facing symbols ⊂ ⊃, widened, with center gap -->
+    <path d="M 496 414 L 466 414 C 432 420, 408 458, 408 516 C 408 574, 432 612, 466 618 L 496 618" stroke-width="30" stroke-linecap="butt"/>
+    <path d="M 528 414 L 558 414 C 592 420, 616 458, 616 516 C 616 574, 592 612, 558 618 L 528 618" stroke-width="30" stroke-linecap="butt"/>
+
+    <!-- stem (centered on axis) -->
+    <path d="M 512 414 C 510 392, 512 376, 520 366" stroke-width="16"/>
+  </g>
+
+  <!-- leaf (top, above the center gap) -->
+  <path d="M 522 368 C 548 346, 586 350, 600 372 C 586 400, 548 402, 522 382 Z"
+        fill="#FFFFFF"/>
+</svg>

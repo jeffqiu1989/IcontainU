@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerResource
 import Foundation
 import SwiftUI
@@ -238,7 +222,7 @@ struct ContainerCard: View {
             }
         }
         .buttonStyle(.plain)
-        .help("在 Finder 中打开 \(mount.source)")
+        .help("Reveal \(mount.source) in Finder")
     }
 
     // MARK: Row scaffolding
@@ -294,7 +278,7 @@ struct ContainerCard: View {
                     .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
-            .help("展开查看全部")
+            .help("Show all")
         } else {
             Color.clear.frame(width: 0, height: 0)
         }
@@ -302,7 +286,7 @@ struct ContainerCard: View {
 
     private func collapseBadge(accent: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text("收起")
+            Text("Collapse")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(accent)
                 .padding(.horizontal, 9)
@@ -310,7 +294,7 @@ struct ContainerCard: View {
                 .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
-        .help("收起")
+        .help("Collapse")
     }
 
     private var actions: some View {

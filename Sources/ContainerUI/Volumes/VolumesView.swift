@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerResource
 import SwiftUI
 
@@ -109,15 +93,23 @@ struct VolumesView: View {
 private struct CreateVolumeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
-    @State private var size = ""
+    /// Size in gigabytes — digits only; the `G` unit is shown as a fixed suffix.
+    @State private var size = "50"
     let onCreate: (String, String) -> Void
 
-    /// Loose client-side check for an obviously malformed size; the server does
-    /// the authoritative parsing (and enforces the 1 MiB minimum / 512 G default).
+    /// A blank size falls back to the server default; otherwise it must be a
+    /// positive integer number of gigabytes.
     private var sizeValid: Bool {
         let trimmed = size.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return true }
-        return trimmed.range(of: #"^\d+(\.\d+)?\s*[KMGTPkmgtp]?[iI]?[bB]?$"#, options: .regularExpression) != nil
+        guard let value = Int(trimmed) else { return false }
+        return value > 0
+    }
+
+    /// The size passed to the server: `<n>G`, or empty to use the default.
+    private var sizeString: String {
+        let trimmed = size.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? "" : "\(trimmed)G"
     }
 
     private var canCreate: Bool {
@@ -136,9 +128,21 @@ private struct CreateVolumeSheet: View {
                     .onSubmit(submit)
             }
             LabeledSection(label: "Size") {
-                TextField("Optional — e.g. 10G (default 512G)", text: $size)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(submit)
+                HStack(spacing: 8) {
+                    TextField("50", text: $size)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                        .multilineTextAlignment(.trailing)
+                        .onChange(of: size) { _, new in
+                            let digits = String(new.filter(\.isNumber).prefix(6))
+                            if digits != new { size = digits }
+                        }
+                        .onSubmit(submit)
+                    Text("G")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
             }
         } footer: {
             Button("Cancel") { dismiss() }
@@ -153,7 +157,7 @@ private struct CreateVolumeSheet: View {
     private func submit() {
         let value = name.trimmingCharacters(in: .whitespaces)
         guard !value.isEmpty, sizeValid else { return }
-        onCreate(value, size.trimmingCharacters(in: .whitespaces))
+        onCreate(value, sizeString)
         dismiss()
     }
 }

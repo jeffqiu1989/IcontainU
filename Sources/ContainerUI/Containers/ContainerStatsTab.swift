@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerAPIClient
 import ContainerResource
 import Foundation
@@ -31,7 +15,9 @@ final class ContainerStatsModel {
     private(set) var loaded = false
 
     private let containerID: String
-    private let client = ContainerClient()
+    // Fresh client per use (cached XPC connections go invalid across apiserver
+    // restarts). See ContainersModel for the rationale.
+    private var client: ContainerClient { ContainerClient() }
     private var lastCPUUsec: UInt64?
     private var lastSampleTime: Date?
 

@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerResource
 import SwiftUI
 
@@ -110,8 +94,36 @@ private struct CreateNetworkSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var hostOnly = false
-    @State private var subnet = ""
+    /// The four subnet octets and the CIDR prefix length. All blank → let the
+    /// plugin auto-allocate; otherwise composed into `a.b.c.d/mask`.
+    @State private var octets: [String] = ["", "", "", ""]
+    @State private var mask = "24"
     let onCreate: (String, Bool, String) -> Void
+
+    /// Every octet filled — a subnet was actually entered.
+    private var subnetProvided: Bool {
+        octets.allSatisfy { !$0.isEmpty }
+    }
+
+    /// Valid when fully blank (auto-allocate) or fully filled with octets in
+    /// 0–254 and a prefix length in 1–32.
+    private var subnetValid: Bool {
+        if octets.allSatisfy(\.isEmpty) { return true }
+        guard subnetProvided else { return false }
+        for octet in octets {
+            guard let value = Int(octet), (0...254).contains(value) else { return false }
+        }
+        guard let prefix = Int(mask), (1...32).contains(prefix) else { return false }
+        return true
+    }
+
+    private var subnetString: String {
+        subnetProvided ? "\(octets[0]).\(octets[1]).\(octets[2]).\(octets[3])/\(mask)" : ""
+    }
+
+    private var canCreate: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && subnetValid
+    }
 
     var body: some View {
         FormSheet(
@@ -125,12 +137,32 @@ private struct CreateNetworkSheet: View {
                     .onSubmit(submit)
             }
             LabeledSection(label: "Subnet") {
-                TextField("Optional — e.g. 192.168.100.0/24", text: $subnet)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(submit)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        numberField($octets[0], placeholder: "192", max: 254, width: 52)
+                        dot
+                        numberField($octets[1], placeholder: "168", max: 254, width: 52)
+                        dot
+                        numberField($octets[2], placeholder: "100", max: 254, width: 52)
+                        dot
+                        numberField($octets[3], placeholder: "0", max: 254, width: 52)
+                        HStack(spacing: 3) {
+                            Text("/")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(Color.primary.opacity(0.7))
+                            numberField($mask, placeholder: "24", max: 32, width: 46)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    Text("Leave blank to auto-assign")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             LabeledSection(label: "Mode") {
                 Toggle("Host-only (internal)", isOn: $hostOnly)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
             }
         } footer: {
             Button("Cancel") { dismiss() }
@@ -138,14 +170,32 @@ private struct CreateNetworkSheet: View {
             Button("Create") { submit() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!canCreate)
         }
+    }
+
+    private var dot: some View {
+        Text(".").foregroundStyle(.secondary)
+    }
+
+    /// A digits-only field that clamps its value to `max` — used for both the
+    /// subnet octets (0–254) and the prefix length (1–32).
+    private func numberField(_ binding: Binding<String>, placeholder: String, max: Int, width: CGFloat) -> some View {
+        TextField(placeholder, text: binding)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: width)
+            .multilineTextAlignment(.center)
+            .onChange(of: binding.wrappedValue) { _, new in
+                var digits = String(new.filter(\.isNumber).prefix(3))
+                if let value = Int(digits), value > max { digits = String(max) }
+                if digits != new { binding.wrappedValue = digits }
+            }
     }
 
     private func submit() {
         let value = name.trimmingCharacters(in: .whitespaces)
-        guard !value.isEmpty else { return }
-        onCreate(value, hostOnly, subnet)
+        guard !value.isEmpty, subnetValid else { return }
+        onCreate(value, hostOnly, subnetString)
         dismiss()
     }
 }

@@ -1,21 +1,6 @@
 #!/bin/bash
-#===----------------------------------------------------------------------===//
-# Copyright © 2026 Apple Inc. and the container project authors.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#===----------------------------------------------------------------------===//
-#
-# Package the container-ui SPM executable into a double-clickable .app bundle
+# Package the IcontainU SPM executable into a double-clickable .app bundle
 # with an ad-hoc code signature. Output: build/IcontainU.app
 #
 # Usage: ./scripts/package-app.sh
@@ -23,9 +8,9 @@
 set -euo pipefail
 
 APP_NAME="IcontainU"
-EXECUTABLE="container-ui"
+EXECUTABLE="IcontainU"
 BUNDLE_ID="com.35ers.IcontainU"
-VERSION="1.0.0"
+VERSION="0.1.0"
 MIN_MACOS="26.0"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,6 +20,9 @@ BUILD_DIR="$REPO_ROOT/build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
+RESOURCES_DIR="$CONTENTS/Resources"
+ICON_SRC="$REPO_ROOT/Sources/ContainerUI/Resources/AppIcon.png"
+ICON_NAME="AppIcon"
 
 echo "==> Building release binary"
 swift build -c release
@@ -47,8 +35,23 @@ fi
 
 echo "==> Assembling $APP_NAME.app"
 rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BIN_PATH" "$MACOS_DIR/$APP_NAME"
+
+echo "==> Generating app icon from $(basename "$ICON_SRC")"
+if [[ ! -f "$ICON_SRC" ]]; then
+    echo "error: icon source not found at $ICON_SRC" >&2
+    exit 1
+fi
+ICONSET="$(mktemp -d)/$ICON_NAME.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    double=$((size * 2))
+    sips -z "$double" "$double" "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$RESOURCES_DIR/$ICON_NAME.icns"
+rm -rf "$(dirname "$ICONSET")"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -67,6 +70,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>$VERSION</string>
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
+    <key>CFBundleIconFile</key>
+    <string>$ICON_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

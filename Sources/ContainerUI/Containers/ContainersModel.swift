@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import ContainerAPIClient
 import ContainerResource
 import ContainerizationOCI
@@ -37,9 +21,21 @@ final class ContainersModel {
     /// Resources offered in the create form's volume / network pickers.
     private(set) var availableVolumes: [VolumeConfiguration] = []
     private(set) var availableNetworks: [NetworkResource] = []
+    /// Local image references (denormalized, e.g. `nginx:latest`) offered as
+    /// autocomplete suggestions and used to decide whether the create form's image
+    /// is already present (Analyze) or still needs fetching (Pull).
+    private(set) var availableImages: [String] = []
+    /// Progress for an image pull triggered from the create form (Pull button).
+    private(set) var pulling: OperationProgress?
 
-    private let client = ContainerClient()
-    private let networkClient = NetworkClient()
+    // Build a fresh client (and XPC connection) per use. The Apple clients cache
+    // their XPC connection for the object's lifetime; a long-lived cached
+    // connection goes invalid when the apiserver restarts (e.g. the first
+    // `container system start`), which then breaks every container call until the
+    // app is relaunched. `ClientImage` already connects per call — mirror that so a
+    // restarted apiserver is transparently reconnected on the next call.
+    private var client: ContainerClient { ContainerClient() }
+    private var networkClient: NetworkClient { NetworkClient() }
 
     func startPolling() async {
         while !Task.isCancelled {
@@ -54,7 +50,10 @@ final class ContainersModel {
             // vanishes from the list the moment it stops). Exclude machines, which
             // are containers under the hood but managed in their own tab.
             let filters = ContainerListFilters.all.withoutMachines()
-            containers = try await client.list(filters: filters)
+            // Sort by id so card order is stable across polls (the server's list
+            // order is not guaranteed, which would otherwise reshuffle cards every
+            // refresh). Richer status/started-time ordering is a separate feature.
+            containers = try await client.list(filters: filters).sorted { $0.id < $1.id }
             pollError = nil
         } catch {
             pollError = error.localizedDescription
@@ -71,7 +70,7 @@ final class ContainersModel {
             try await process.start()
             await refresh()
         } catch {
-            lastError = OperationError(title: "启动容器失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to start container", detail: error.localizedDescription)
         }
     }
 
@@ -83,7 +82,7 @@ final class ContainersModel {
             try await client.stop(id: container.id)
             await refresh()
         } catch {
-            lastError = OperationError(title: "停止容器失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to stop container", detail: error.localizedDescription)
         }
     }
 
@@ -95,7 +94,7 @@ final class ContainersModel {
             try await client.delete(id: container.id, force: force)
             await refresh()
         } catch {
-            lastError = OperationError(title: "删除容器失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to delete container", detail: error.localizedDescription)
         }
     }
 
@@ -105,7 +104,7 @@ final class ContainersModel {
         do {
             try TerminalLauncher.execInContainer(id: container.id)
         } catch {
-            lastError = OperationError(title: "打开终端失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to open Terminal", detail: error.localizedDescription)
         }
     }
 
@@ -122,18 +121,102 @@ final class ContainersModel {
             let metadata = try await ImageInspector.analyze(image: img, platform: platform)
             return metadata
         } catch {
-            lastError = OperationError(title: "镜像分析失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Image analysis failed", detail: error.localizedDescription)
             return ImageMetadata()
         }
     }
 
-    /// Load the volumes and networks offered in the create form's pickers.
-    /// Best effort: a failure here just leaves the pickers with built-in options.
+    /// Load the volumes, networks and local images offered in the create form's
+    /// pickers / autocomplete. Best effort: a failure here just leaves the inputs
+    /// with built-in options.
     func loadCreateResources() async {
         async let volumes = try? ClientVolume.list()
         async let networks = try? networkClient.list()
         availableVolumes = (await volumes ?? []).sorted { $0.name < $1.name }
         availableNetworks = await networks ?? []
+        await refreshAvailableImages()
+    }
+
+    /// Refresh the local image suggestion list, denormalized for display and
+    /// deduplicated. Best effort.
+    private func refreshAvailableImages() async {
+        guard let raw = try? await ClientImage.list() else { return }
+        var seen = Set<String>()
+        var refs: [String] = []
+        for image in raw {
+            let parsed = ParsedImageReference(image.reference)
+            let display = parsed.tag.map { "\(parsed.repository):\($0)" } ?? parsed.repository
+            guard seen.insert(display).inserted else { continue }
+            refs.append(display)
+        }
+        availableImages = refs.sorted()
+    }
+
+    /// True when `reference` already matches a local image — i.e. the create form
+    /// can Analyze it directly instead of pulling. An untagged input matches any
+    /// tag of the same repository (mirroring the implicit `:latest`).
+    func isImageLocal(_ reference: String) -> Bool {
+        let trimmed = reference.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        let parsed = ParsedImageReference(trimmed)
+        for local in availableImages {
+            if local == trimmed { return true }
+            let localParsed = ParsedImageReference(local)
+            if localParsed.repository == parsed.repository {
+                // Untagged input → repository match is enough; otherwise tags must match.
+                if parsed.tag == nil || parsed.tag == localParsed.tag { return true }
+            }
+        }
+        return false
+    }
+
+    /// Pull (and unpack) an image for the create form, reporting progress on
+    /// `pulling`. Returns true on success so the caller can then analyze it.
+    func pullForCreate(reference: String) async -> Bool {
+        let trimmed = reference.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        lastError = nil
+
+        let platform = try? Platform(from: "linux/\(Arch.hostArchitecture().rawValue)")
+        let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
+        var progress = OperationProgress()
+        progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
+        pulling = progress
+        defer { pulling = nil }
+
+        let coordinator = ProgressTaskCoordinator()
+        defer { Task { await coordinator.finish() } }
+        do {
+            let config = try await SystemConfig.load()
+            let fetchTask = await coordinator.startTask()
+            let image = try await MirrorPull.pull(
+                originalReference: trimmed,
+                platform: platform,
+                config: config,
+                progressUpdate: ProgressTaskCoordinator.handler(for: fetchTask, from: pullProgressHandler))
+
+            let unpackTask = await coordinator.startTask()
+            pulling?.beginPhase("Unpacking…")
+            try await image.unpack(
+                platform: platform,
+                progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: pullProgressHandler))
+            await refreshAvailableImages()
+            return true
+        } catch {
+            lastError = OperationError(title: "Failed to pull image", detail: error.localizedDescription)
+            return false
+        }
+    }
+
+    private var pullProgressHandler: ProgressUpdateHandler {
+        { [weak self] events in
+            await self?.applyPullProgress(events)
+        }
+    }
+
+    private func applyPullProgress(_ events: [ProgressUpdateEvent]) {
+        guard pulling != nil else { return }
+        pulling?.apply(events)
     }
 
     /// Create + start a container. Image fetch and container prepare are run as
@@ -155,7 +238,7 @@ final class ContainersModel {
             await reportIfStopped(id: id)
         } catch {
             await coordinator.finish()
-            lastError = OperationError(title: "创建容器失败", detail: error.localizedDescription)
+            lastError = OperationError(title: "Failed to create container", detail: error.localizedDescription)
         }
     }
 
@@ -180,7 +263,7 @@ final class ContainersModel {
         guard let container = containers.first(where: { $0.id == id }) else { return }
         if container.status == .stopped {
             lastError = OperationError(
-                title: "容器已停止",
+                title: "Container already stopped",
                 detail: "Container \"\(id)\" has already stopped. "
                     + "If that wasn't expected, open it and check the Logs tab.")
         }

@@ -1,19 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Copyright © 2026 Apple Inc. and the container project authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//===----------------------------------------------------------------------===//
-
 import AppKit
 import SwiftUI
 
@@ -86,21 +70,21 @@ struct ErrorBanner: View {
                         Image(systemName: "doc.on.doc")
                     }
                     .buttonStyle(.borderless)
-                    .help("复制错误信息")
+                    .help("Copy error details")
 
                     if let onDismiss {
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
                         }
                         .buttonStyle(.borderless)
-                        .help("关闭")
+                        .help("Dismiss")
                     }
                 }
                 .foregroundStyle(.secondary)
                 .font(.callout)
 
                 if isTruncatable {
-                    Button("详情") { showDetail = true }
+                    Button("Details") { showDetail = true }
                         .buttonStyle(.plain)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.tint)
@@ -134,14 +118,14 @@ struct ErrorBanner: View {
             .frame(maxHeight: 240)
             HStack {
                 Spacer()
-                Button("复制", action: copy)
+                Button("Copy", action: copy)
             }
         }
         .padding(14)
         .frame(width: 420)
     }
 
-    /// Whether the detail is long enough to be worth a "详情" popover (the strip
+    /// Whether the detail is long enough to be worth a "Details" popover (the strip
     /// shows at most three lines; assume ~70 chars/line).
     private var isTruncatable: Bool {
         detail.count > Self.collapsedLineLimit * 70 || detail.contains("\n")
