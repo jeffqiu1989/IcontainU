@@ -18,7 +18,7 @@ final class SystemModel {
     private(set) var state: State = .unknown
     private(set) var isBusy = false
     private(set) var statusHint: String?
-    private(set) var actionError: String?
+    private(set) var actionError: OperationError?
 
     var isRunning: Bool {
         if case .running = state { return true }
@@ -64,8 +64,8 @@ final class SystemModel {
         do {
             try await Task.detached { try TerminalLauncher.startSystem() }.value
         } catch {
-            actionError =
-                "Failed to start the system.\n\(error.localizedDescription)"
+            actionError = OperationError(
+                title: "Failed to start the system", detail: error.localizedDescription)
         }
         await ping()
     }
@@ -78,7 +78,8 @@ final class SystemModel {
         do {
             try await Task.detached { try TerminalLauncher.stopSystem() }.value
         } catch {
-            actionError = error.localizedDescription
+            actionError = OperationError(
+                title: "Failed to stop the system", detail: error.localizedDescription)
         }
         await ping()
     }
@@ -89,4 +90,6 @@ final class SystemModel {
             NSWorkspace.shared.open(url)
         }
     }
+
+    func clearActionError() { actionError = nil }
 }

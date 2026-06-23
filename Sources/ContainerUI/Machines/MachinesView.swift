@@ -8,6 +8,7 @@ struct MachinesView: View {
     @State private var selectedID: MachineSnapshot.ID?
     @State private var pendingDelete: MachineSnapshot?
     @State private var showCreateSheet = false
+    @State private var copyToast = false
 
     private var filteredMachines: [MachineSnapshot] {
         guard !searchText.isEmpty else { return model.machines }
@@ -21,9 +22,20 @@ struct MachinesView: View {
                 InlineProgressBar(progress: creating, accent: Palette.machines)
             }
             if let error = model.lastError {
-                ErrorBanner(error: error, onDismiss: { model.clearError() })
+                ErrorBanner(
+                    error: error,
+                    onCopy: { showCopyToast() },
+                    onDismiss: { model.clearError() })
+            }
+            if let error = model.pollError, !model.machines.isEmpty {
+                ErrorBanner(message: error)
             }
             cardGrid
+        }
+        .overlay(alignment: .top) {
+            if copyToast {
+                copyToastView
+            }
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search machines")
         .toolbar {
@@ -73,7 +85,15 @@ struct MachinesView: View {
     @ViewBuilder
     private var cardGrid: some View {
         if model.machines.isEmpty {
-            ContentUnavailableView("No Machines", systemImage: "server.rack")
+            if let pollError = model.pollError {
+                ContentUnavailableView {
+                    Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(pollError)
+                }
+            } else {
+                ContentUnavailableView("No Machines", systemImage: "server.rack")
+            }
         } else if filteredMachines.isEmpty {
             ContentUnavailableView.search(text: searchText)
         } else {
@@ -91,6 +111,7 @@ struct MachinesView: View {
                             machine: machine,
                             isDefault: machine.id == model.defaultID,
                             isSelected: selectedID == machine.id,
+                            isBusy: model.busyItemIDs.contains(machine.id),
                             onSelect: {
                                 selectedID = (selectedID == machine.id) ? nil : machine.id
                             },
@@ -103,6 +124,26 @@ struct MachinesView: View {
                 }
                 .padding(16)
             }
+        }
+    }
+
+    private var copyToastView: some View {
+        Text("Copied")
+            .font(.callout.weight(.medium))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.thinMaterial, in: Capsule())
+            .overlay { Capsule().strokeBorder(.secondary.opacity(0.2), lineWidth: 1) }
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            .padding(.top, 12)
+            .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private func showCopyToast() {
+        withAnimation(.easeOut(duration: 0.2)) { copyToast = true }
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            withAnimation(.easeIn(duration: 0.2)) { copyToast = false }
         }
     }
 }

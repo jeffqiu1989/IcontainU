@@ -113,7 +113,9 @@ private struct TagDetailRow: View {
     @State private var showArches = false
 
     private var sizeText: String {
-        ByteCountFormatter.string(fromByteCount: tag.totalSize, countStyle: .file)
+        tag.totalSize > 0
+            ? ByteCountFormatter.string(fromByteCount: tag.totalSize, countStyle: .file)
+            : "—"
     }
 
     var body: some View {
@@ -175,7 +177,7 @@ private struct TagDetailRow: View {
                                     .font(.caption2.monospaced())
                                     .foregroundStyle(Color.primary.opacity(0.6))
                                 Spacer(minLength: 0)
-                                Text(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
+                                Text(entry.size > 0 ? ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file) : "—")
                                     .font(.caption2)
                                     .foregroundStyle(Color.primary.opacity(0.7))
                             }

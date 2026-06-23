@@ -111,8 +111,7 @@ final class ImagesModel {
                 progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
             await refresh()
         } catch {
-            lastError = OperationError(
-                title: "Failed to pull image", detail: error.localizedDescription)
+            lastError = .from("Failed to pull image", error: error)
         }
     }
 

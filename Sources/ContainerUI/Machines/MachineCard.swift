@@ -8,6 +8,7 @@ struct MachineCard: View {
     let machine: MachineSnapshot
     let isDefault: Bool
     let isSelected: Bool
+    let isBusy: Bool
     let onSelect: () -> Void
     let onBoot: () -> Void
     let onStop: () -> Void
@@ -49,8 +50,17 @@ struct MachineCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Palette.cardBorder, lineWidth: isSelected ? 2 : 1)
+                .strokeBorder(Palette.cardBorder, lineWidth: isSelected ? 3 : 1)
         }
+        .overlay {
+            if isBusy {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.background.opacity(0.7))
+                ProgressView()
+                    .controlSize(.regular)
+            }
+        }
+        .disabled(isBusy)
         .shadow(
             color: .black.opacity(isSelected ? 0.24 : (hovering ? 0.10 : 0.03)),
             radius: isSelected ? 12 : (hovering ? 5 : 2), y: isSelected ? 3 : 1
@@ -84,11 +94,11 @@ struct MachineCard: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Spacer()
-            actionButton(icon: "play.fill", tint: .green, help: "Boot", disabled: isRunning, action: onBoot)
-            actionButton(icon: "stop.fill", tint: .orange, help: "Stop", disabled: !isRunning, action: onStop)
+            actionButton(icon: "play.fill", tint: .green, help: "Boot", disabled: isRunning || isBusy, action: onBoot)
+            actionButton(icon: "stop.fill", tint: .orange, help: "Stop", disabled: !isRunning || isBusy, action: onStop)
             actionButton(
-                icon: "terminal", tint: .blue, help: "Open shell", disabled: false, action: onRun)
-            actionButton(icon: "trash", tint: .red, help: "Delete", disabled: false, action: onDelete)
+                icon: "terminal", tint: .blue, help: "Open shell", disabled: isBusy, action: onRun)
+            actionButton(icon: "trash", tint: .red, help: "Delete", disabled: isBusy, action: onDelete)
         }
         .padding(.top, 2)
     }
@@ -98,12 +108,18 @@ struct MachineCard: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.caption)
-                .frame(width: 26, height: 16)
+                .font(.body)
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 16)
+                .padding(4)
+                .background(Color(.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(tint.opacity(0.5), lineWidth: 1)
+                }
+                .opacity(disabled ? 0.3 : 1)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .tint(tint)
+        .buttonStyle(.borderless)
         .disabled(disabled)
         .help(help)
     }

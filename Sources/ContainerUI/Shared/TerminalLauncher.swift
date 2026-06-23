@@ -62,8 +62,9 @@ enum TerminalLauncher {
     /// whether the first start will trigger a kernel download.
     static var isKernelInstalled: Bool {
         let appRoot = ProcessInfo.processInfo.environment["CONTAINER_APP_ROOT"]
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("com.apple.container").path
+            ?? NSHomeDirectory() + "/Library/Application Support/com.apple.container"
         let arch = "arm64"
         let kernelPath = (appRoot as NSString).appendingPathComponent("kernels/default.kernel-\(arch)")
         return FileManager.default.fileExists(atPath: kernelPath)

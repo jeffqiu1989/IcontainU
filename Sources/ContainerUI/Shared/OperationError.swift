@@ -1,3 +1,4 @@
+import ContainerAPIClient
 import Foundation
 
 /// A user-facing failure from an explicit action (start/stop/delete/create/pull).
@@ -19,5 +20,23 @@ struct OperationError: Identifiable, Equatable {
 
     static func == (lhs: OperationError, rhs: OperationError) -> Bool {
         lhs.id == rhs.id
+    }
+
+    /// Wraps an error for user display. When the error indicates the requested
+    /// platform is not available — e.g. pulling an amd64-only image on Apple
+    /// Silicon — the detail explains the architecture mismatch instead of
+    /// dumping the raw daemon message.
+    static func from(_ title: String, error: Error, arch: String = Arch.hostArchitecture().rawValue) -> OperationError {
+        let msg = error.localizedDescription.lowercased()
+        if msg.contains("unsupported platform") || msg.contains("no matching manifest")
+            || msg.contains("manifest not found")
+        {
+            return OperationError(
+                title: title,
+                detail: "This image doesn't support \(arch) (Apple Silicon). "
+                    + "It may only be available for amd64/x86_64. "
+                    + "Try an image with linux/\(arch) support.")
+        }
+        return OperationError(title: title, detail: error.localizedDescription)
     }
 }

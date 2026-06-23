@@ -121,7 +121,7 @@ final class ContainersModel {
             let metadata = try await ImageInspector.analyze(image: img, platform: platform)
             return metadata
         } catch {
-            lastError = OperationError(title: "Image analysis failed", detail: error.localizedDescription)
+            lastError = .from("Image analysis failed", error: error)
             return ImageMetadata()
         }
     }
@@ -203,7 +203,7 @@ final class ContainersModel {
             await refreshAvailableImages()
             return true
         } catch {
-            lastError = OperationError(title: "Failed to pull image", detail: error.localizedDescription)
+            lastError = .from("Failed to pull image", error: error)
             return false
         }
     }
@@ -238,7 +238,7 @@ final class ContainersModel {
             await reportIfStopped(id: id)
         } catch {
             await coordinator.finish()
-            lastError = OperationError(title: "Failed to create container", detail: error.localizedDescription)
+            lastError = .from("Failed to create container", error: error)
         }
     }
 

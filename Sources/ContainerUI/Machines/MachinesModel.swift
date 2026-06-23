@@ -17,6 +17,7 @@ final class MachinesModel {
     /// Failure of an explicit action: never cleared by polling.
     private(set) var lastError: OperationError?
     private(set) var creating: OperationProgress?
+    private(set) var busyItemIDs: Set<String> = []
 
     func clearError() { lastError = nil }
 
@@ -46,6 +47,8 @@ final class MachinesModel {
 
     func boot(_ machine: MachineSnapshot) async {
         lastError = nil
+        busyItemIDs.insert(machine.id)
+        defer { busyItemIDs.remove(machine.id) }
         do {
             _ = try await client.boot(id: machine.id)
             await refresh()
@@ -56,6 +59,8 @@ final class MachinesModel {
 
     func stop(_ machine: MachineSnapshot) async {
         lastError = nil
+        busyItemIDs.insert(machine.id)
+        defer { busyItemIDs.remove(machine.id) }
         do {
             try await client.stop(id: machine.id)
             await refresh()
@@ -77,6 +82,8 @@ final class MachinesModel {
 
     func delete(_ machine: MachineSnapshot) async {
         lastError = nil
+        busyItemIDs.insert(machine.id)
+        defer { busyItemIDs.remove(machine.id) }
         do {
             try await client.delete(id: machine.id)
             await refresh()
@@ -165,7 +172,7 @@ final class MachinesModel {
             }
             await refresh()
         } catch {
-            lastError = OperationError(title: "Failed to create machine", detail: error.localizedDescription)
+            lastError = .from("Failed to create machine", error: error)
         }
     }
 

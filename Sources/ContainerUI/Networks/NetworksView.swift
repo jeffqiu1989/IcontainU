@@ -19,6 +19,9 @@ struct NetworksView: View {
             if let error = model.lastError {
                 ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
+            if let error = model.pollError, !model.networks.isEmpty {
+                ErrorBanner(message: error)
+            }
             cardGrid
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search networks")
@@ -59,7 +62,15 @@ struct NetworksView: View {
     @ViewBuilder
     private var cardGrid: some View {
         if model.networks.isEmpty {
-            ContentUnavailableView("No Networks", systemImage: "network")
+            if let pollError = model.pollError {
+                ContentUnavailableView {
+                    Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(pollError)
+                }
+            } else {
+                ContentUnavailableView("No Networks", systemImage: "network")
+            }
         } else if filteredNetworks.isEmpty {
             ContentUnavailableView.search(text: searchText)
         } else {

@@ -128,12 +128,8 @@ struct SystemUnavailableOverlay: View {
             }
 
             if let error = system.actionError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-                    .textSelection(.enabled)
+                ErrorBanner(error: error, onDismiss: { system.clearActionError() })
+                    .padding(.horizontal, 40)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -35,6 +35,9 @@ struct ContainersView: View {
                     onCopy: { showCopyToast() },
                     onDismiss: { model.clearError() })
             }
+            if let error = model.pollError, !model.containers.isEmpty {
+                ErrorBanner(message: error)
+            }
             cardGrid
         }
         .overlay(alignment: .top) {

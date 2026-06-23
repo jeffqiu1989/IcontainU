@@ -49,16 +49,3 @@ struct RootView: View {
     }
 }
 
-/// Placeholder shown for resource domains that are on the roadmap but not yet built.
-struct ComingSoonView: View {
-    let title: String
-    let systemImage: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-        } description: {
-            Text("Coming soon.")
-        }
-    }
-}

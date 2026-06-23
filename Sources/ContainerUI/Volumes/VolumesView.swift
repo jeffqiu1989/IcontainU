@@ -19,6 +19,9 @@ struct VolumesView: View {
             if let error = model.lastError {
                 ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
+            if let error = model.pollError, !model.volumes.isEmpty {
+                ErrorBanner(message: error)
+            }
             cardGrid
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search volumes")
@@ -59,7 +62,15 @@ struct VolumesView: View {
     @ViewBuilder
     private var cardGrid: some View {
         if model.volumes.isEmpty {
-            ContentUnavailableView("No Volumes", systemImage: "externaldrive")
+            if let pollError = model.pollError {
+                ContentUnavailableView {
+                    Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(pollError)
+                }
+            } else {
+                ContentUnavailableView("No Volumes", systemImage: "externaldrive")
+            }
         } else if filteredVolumes.isEmpty {
             ContentUnavailableView.search(text: searchText)
         } else {

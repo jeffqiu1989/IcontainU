@@ -11,7 +11,7 @@ import SwiftUI
 final class ContainerLogsModel {
     private(set) var text: String = ""
     private(set) var isLoading = false
-    private(set) var errorMessage: String?
+    private(set) var errorMessage: OperationError?
     var following = false {
         didSet { following ? startFollowing() : stopFollowing() }
     }
@@ -44,7 +44,7 @@ final class ContainerLogsModel {
             }
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = OperationError(title: "Failed to load logs", detail: error.localizedDescription)
         }
     }
 
@@ -63,7 +63,7 @@ final class ContainerLogsModel {
                     }
                 }
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = OperationError(title: "Failed to follow logs", detail: error.localizedDescription)
                 following = false
             }
         }
@@ -92,7 +92,7 @@ struct ContainerLogsTab: View {
     var body: some View {
         VStack(spacing: 0) {
             if let error = model.errorMessage {
-                ErrorBanner(message: error)
+                ErrorBanner(error: error, onDismiss: {})
             }
             logContent
             Divider()

@@ -57,6 +57,11 @@ enum MirrorPull {
     /// - When a mirror matches, pulls via the mirror, retags to the normalized
     ///   original reference, and removes the mirror-named tag (blobs are kept,
     ///   since the canonical tag still references them).
+    ///
+    /// When the daemon rejects the pull because the image has no matching
+    /// manifest for the requested platform (e.g. amd64-only image on Apple
+    /// Silicon), it may have already stored the image index locally — leaving a
+    /// 0 KB orphan. We clean that up before re-throwing.
     @MainActor
     static func pull(
         originalReference: String,
@@ -68,19 +73,26 @@ enum MirrorPull {
 
         // No mirror in effect — pull as-is; pull normalizes internally.
         guard mirrorReference != originalReference else {
-            return try await ClientImage.pull(
-                reference: originalReference,
-                platform: platform,
-                containerSystemConfig: config,
+            return try await pullAndCleanupOrphan(
+                reference: originalReference, platform: platform, config: config,
                 progressUpdate: progressUpdate)
         }
 
-        // Pull via the mirror for acceleration.
-        let pulled = try await ClientImage.pull(
-            reference: mirrorReference,
-            platform: platform,
-            containerSystemConfig: config,
-            progressUpdate: progressUpdate)
+        // Pull via the mirror for acceleration. Mirror references are always
+        // transient — an orphan here can be cleaned up unconditionally.
+        let pulled: ClientImage
+        do {
+            pulled = try await ClientImage.pull(
+                reference: mirrorReference,
+                platform: platform,
+                containerSystemConfig: config,
+                progressUpdate: progressUpdate)
+        } catch {
+            // Stray mirror-named tag created by a failed pull → best-effort delete.
+            guard isPlatformMismatch(error) else { throw error }
+            try? await ClientImage.delete(reference: mirrorReference, garbageCollect: false)
+            throw error
+        }
 
         // Retag to the canonical original reference (correct for any source: a
         // bare name resolves under docker.io, a domained name keeps its domain).
@@ -100,5 +112,47 @@ enum MirrorPull {
         }
 
         return retagged
+    }
+
+    /// Pull directly (no mirror) and clean up a potential orphan when the daemon
+    /// writes the image index before rejecting the platform — safe because we
+    /// only delete when the image did not exist locally before this pull.
+    private static func pullAndCleanupOrphan(
+        reference: String,
+        platform: Platform?,
+        config: ContainerSystemConfig,
+        progressUpdate: ProgressUpdateHandler?
+    ) async throws -> ClientImage {
+        // Remember whether this image already had a local entry so we can decide
+        // whether a failed pull left a new orphan.
+        let existedBefore = (try? await ClientImage.get(
+            reference: reference, containerSystemConfig: config)) != nil
+
+        do {
+            return try await ClientImage.pull(
+                reference: reference,
+                platform: platform,
+                containerSystemConfig: config,
+                progressUpdate: progressUpdate)
+        } catch {
+            // The daemon may have stored the index before rejecting the platform.
+            // Only clean up images that were NOT present before this pull attempt;
+            // a previously-existing image (e.g. pulled with a different platform)
+            // must not be removed.
+            if !existedBefore, isPlatformMismatch(error) {
+                log.debug(
+                    "removing orphan image from failed platform-mismatch pull",
+                    metadata: ["reference": "\(reference)"])
+                try? await ClientImage.delete(reference: reference, garbageCollect: false)
+            }
+            throw error
+        }
+    }
+
+    private static func isPlatformMismatch(_ error: Error) -> Bool {
+        let msg = error.localizedDescription.lowercased()
+        return msg.contains("unsupported platform")
+            || msg.contains("no matching manifest")
+            || msg.contains("manifest not found")
     }
 }

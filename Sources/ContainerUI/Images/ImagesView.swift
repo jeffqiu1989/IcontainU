@@ -27,6 +27,9 @@ struct ImagesView: View {
             if let error = model.lastError {
                 ErrorBanner(error: error, onDismiss: { model.clearError() })
             }
+            if let error = model.pollError, !model.images.isEmpty {
+                ErrorBanner(message: error)
+            }
             cardGrid
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search images")
@@ -68,7 +71,15 @@ struct ImagesView: View {
     @ViewBuilder
     private var cardGrid: some View {
         if model.images.isEmpty {
-            ContentUnavailableView("No Images", systemImage: "opticaldiscdrive")
+            if let pollError = model.pollError {
+                ContentUnavailableView {
+                    Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(pollError)
+                }
+            } else {
+                ContentUnavailableView("No Images", systemImage: "opticaldiscdrive")
+            }
         } else if filteredGroups.isEmpty {
             ContentUnavailableView.search(text: searchText)
         } else {
