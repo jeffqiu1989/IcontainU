@@ -186,7 +186,7 @@ struct ContainerCard: View {
             } else {
                 SingleLineFitLayout(spacing: 8, overflow: $mountOverflow) {
                     ForEach(Array(mounts.enumerated()), id: \.offset) { _, mount in
-                        dataChip(mountLabel(mount), accent: Palette.mount) { openInFinder(mount.source) }
+                        dataChip(mountLabel(mount), accent: Palette.mount) { openInFinder(mount) }
                     }
                     moreBadge(mountOverflow, accent: Palette.mount) { expandedMounts = true }
                 }
@@ -199,7 +199,7 @@ struct ContainerCard: View {
     /// reveal the host source in Finder.
     private func mountFullRow(_ mount: Filesystem) -> some View {
         Button {
-            openInFinder(mount.source)
+            openInFinder(mount)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up.forward.app")
@@ -222,7 +222,9 @@ struct ContainerCard: View {
             }
         }
         .buttonStyle(.plain)
-        .help("Reveal \(mount.source) in Finder")
+        .help(mount.isBlock || mount.isVolume
+              ? "Reveal \(mount.source) in Finder"
+              : "Open \(mount.source) in Finder")
     }
 
     // MARK: Row scaffolding
@@ -365,8 +367,17 @@ struct ContainerCard: View {
         onCopy(value)
     }
 
-    private func openInFinder(_ path: String) {
+    private func openInFinder(_ mount: Filesystem) {
+        let path = mount.source
         guard !path.isEmpty else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        let url = URL(fileURLWithPath: path)
+        if mount.isBlock || mount.isVolume {
+            // Volume .img files cannot be mounted by macOS while the container
+            // is using them — reveal in Finder instead.
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            // Bind-mount directories: open inside.
+            NSWorkspace.shared.open(url)
+        }
     }
 }

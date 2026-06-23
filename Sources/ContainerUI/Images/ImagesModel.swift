@@ -168,7 +168,11 @@ struct ImageArchEntry: Identifiable {
 
 /// One image reference (a single tag) within a repository group.
 struct ImageTagRow: Identifiable {
-    /// The image's index digest — stable identity for the row.
+    /// Unique per-tag identity: the full canonical reference (name:tag).
+    /// Using the index digest alone would collide when two tags share the
+    /// same manifest list — e.g. `alpine:3.24` and `alpine:latest` resolving
+    /// to the same index — causing SwiftUI to render both rows with the
+    /// same tag text.
     let id: String
     /// The underlying image resource, retained so the view can delete by `name`.
     let image: ContainerImage
@@ -222,7 +226,7 @@ struct ImageRepoGroup: Identifiable {
             others.remove(at: index)
         }
         return ImageTagRow(
-            id: image.id,
+            id: image.name,
             image: image,
             tag: tag ?? "<none>",
             current: current,

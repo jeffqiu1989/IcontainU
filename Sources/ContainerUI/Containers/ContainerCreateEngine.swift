@@ -55,12 +55,14 @@ enum ContainerCreateEngine {
             // Container does not exist — safe to proceed.
         }
 
-        // Pre-pull through any configured mirror so the fetch inside
-        // containerConfigFromFlags finds the (mirror-free) image locally.
+        // Resolve the image local-first (Docker `run` semantics): use the cached
+        // image when present, fetching through a mirror only when it is missing.
+        // This avoids a redundant registry round-trip — and a redundant mirror
+        // retag/cleanup — on every create when the image is already local.
         let platform = try? Platform(from: "linux/\(Arch.hostArchitecture().rawValue)")
-        log.debug("pre-pulling image via mirror store", metadata: ["reference": "\(spec.image)"])
+        log.debug("resolving image local-first", metadata: ["reference": "\(spec.image)"])
         let fetchHandler = await beginPhase("Fetching image…")
-        let image = try await MirrorPull.pull(
+        let image = try await MirrorPull.fetch(
             originalReference: spec.image,
             platform: platform,
             config: config,
