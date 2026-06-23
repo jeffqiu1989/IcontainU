@@ -85,17 +85,21 @@ struct MachinesView: View {
     @ViewBuilder
     private var cardGrid: some View {
         if model.machines.isEmpty {
-            if let pollError = model.pollError {
-                ContentUnavailableView {
-                    Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(pollError)
+            VStack(spacing: 0) {
+                if let pollError = model.pollError {
+                    ContentUnavailableView {
+                        Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(pollError)
+                    }
+                } else {
+                    ContentUnavailableView("No Machines", systemImage: "server.rack")
                 }
-            } else {
-                ContentUnavailableView("No Machines", systemImage: "server.rack")
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         } else if filteredMachines.isEmpty {
             ContentUnavailableView.search(text: searchText)
+                .frame(maxHeight: .infinity, alignment: .top)
         } else {
             ScrollView {
                 LazyVGrid(

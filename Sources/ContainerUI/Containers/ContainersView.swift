@@ -130,17 +130,21 @@ struct ContainersView: View {
     @ViewBuilder
     private var cardGrid: some View {
         if model.containers.isEmpty {
-            if let pollError = model.pollError {
-                ContentUnavailableView {
-                    Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(pollError)
+            VStack(spacing: 0) {
+                if let pollError = model.pollError {
+                    ContentUnavailableView {
+                        Label("Can't reach the container service", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(pollError)
+                    }
+                } else {
+                    ContentUnavailableView("No Containers", systemImage: "shippingbox")
                 }
-            } else {
-                ContentUnavailableView("No Containers", systemImage: "shippingbox")
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         } else if filteredContainers.isEmpty {
             ContentUnavailableView.search(text: searchText)
+                .frame(maxHeight: .infinity, alignment: .top)
         } else {
             ScrollView {
                 LazyVGrid(
