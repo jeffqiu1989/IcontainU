@@ -11,6 +11,9 @@ struct CreateContainerSheet: View {
     @FocusState private var imageFieldFocused: Bool
     /// Keyboard-highlighted row in the image suggestion list (arrow-key navigation).
     @State private var highlightedSuggestion = 0
+    /// Pull / analyze error surfaced as an alert inside this sheet so it's not
+    /// hidden behind the modal (the model's banner lives in ContainersView).
+    @State private var pullError: OperationError?
 
     /// Backs image autocomplete, local/remote detection, pull and analysis.
     let model: ContainersModel
@@ -86,6 +89,19 @@ struct CreateContainerSheet: View {
             .keyboardShortcut(.defaultAction)
             .buttonStyle(.borderedProminent)
             .disabled(!canCreate)
+        }
+        .alert(
+            pullError?.title ?? "",
+            isPresented: Binding(get: { pullError != nil }, set: { if !$0 { pullError = nil } }),
+            presenting: pullError
+        ) { error in
+            Button("OK") {}
+            Button("Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString("\(error.title)\n\(error.detail)", forType: .string)
+            }
+        } message: { error in
+            Text(error.detail)
         }
     }
 
@@ -405,17 +421,32 @@ struct CreateContainerSheet: View {
 
     /// Load = Pull-then-Analyze for a remote image, or Analyze directly for a local
     /// one. After analysis, fill an empty Name field with a generated one (#2).
+    /// Errors during pull / analyze are surfaced as an alert inside the sheet so
+    /// they aren't hidden behind the modal.
     private func loadAction() {
         let image = form.image.trimmingCharacters(in: .whitespaces)
         guard !image.isEmpty, !form.analyzing, model.pulling == nil else { return }
         imageFieldFocused = false
+        // Clear any stale model error before starting (the alert reads the model
+        // error after each step).
+        model.clearError()
         Task { @MainActor in
             if !model.isImageLocal(image) {
-                guard await model.pullForCreate(reference: image) else { return }
+                guard await model.pullForCreate(reference: image) else {
+                    pullError = model.lastError
+                    model.clearError()
+                    return
+                }
             }
             form.analyzing = true
             let metadata = await model.analyze(image: image)
             form.apply(metadata: metadata)
+            form.analyzing = false
+            if let error = model.lastError {
+                pullError = error
+                model.clearError()
+                return
+            }
             if form.name.trimmingCharacters(in: .whitespaces).isEmpty {
                 form.name = NameGenerator.random(avoiding: existingNames)
             }
