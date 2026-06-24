@@ -132,7 +132,7 @@ final class MachinesModel {
         guard !trimmedImage.isEmpty else { return }
 
         lastError = nil
-        var progress = OperationProgress()
+        let progress = OperationProgress()
         progress.beginPhase("Fetching image…")
         creating = progress
         defer { creating = nil }
@@ -220,7 +220,6 @@ final class MachinesModel {
     }
 
     private func applyProgress(_ events: [ProgressUpdateEvent]) {
-        guard creating != nil else { return }
         creating?.apply(events)
     }
 }

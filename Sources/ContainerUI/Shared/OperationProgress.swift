@@ -21,12 +21,21 @@ import TerminalProgress
 ///    total change locks the bar at the first 100% forever.)
 ///
 /// A phase boundary (`beginPhase`) resets everything so each phase starts fresh.
-struct OperationProgress {
-    /// Human-facing phase label, set by the model at each phase boundary
+///
+/// This is a reference type (`@Observable @MainActor final class`) so progress
+/// events fold into the instance in place (`apply` mutates `self`). The value-type
+/// copy-then-writeback it replaced discarded accumulated bytes whenever a reducer
+/// chose not to write back (a throttle-on-read bug that made the kernel download
+/// bar read as indeterminate). `InlineProgressBar` observes the instance directly,
+/// so a property change drives the UI without the owning model re-publishing it.
+@Observable
+@MainActor
+final class OperationProgress {
+    /// Human-facing phase label, set at each phase boundary
     /// (e.g. "Pulling nginx:latest…", "Unpacking…").
-    var phaseLabel: String = "Preparing…"
-    var currentSize: Int64 = 0
-    var totalSize: Int64 = 0
+    var phaseLabel: String
+    private(set) var currentSize: Int64 = 0
+    private(set) var totalSize: Int64 = 0
 
     /// The fraction the bar draws. See the type doc for the monotonic rule.
     private(set) var displayedFraction: Double = 0
@@ -34,6 +43,17 @@ struct OperationProgress {
     /// Totals below this are just manifests/configs, not real payload — treat as
     /// indeterminate so a fully-fetched tiny manifest doesn't read as 100%.
     private static let determinateFloor: Int64 = 1 << 20  // 1 MiB
+
+    /// Once an "unpack" phase is detected the CLI resets its byte counters, which
+    /// would make the bar jump backward. From then on we keep only the phase
+    /// label and suppress byte updates. `apply` flips this on the first
+    /// `setDescription` containing "unpack" and `beginPhase`s into it — the kernel
+    /// download relies on this; pulls/creates simply don't emit such a description.
+    private var unpacking = false
+
+    init(phaseLabel: String = "Preparing…") {
+        self.phaseLabel = phaseLabel
+    }
 
     /// The instantaneous fraction implied by the byte counts (0 when no total).
     var rawFraction: Double {
@@ -46,7 +66,7 @@ struct OperationProgress {
 
     /// Begin a new phase: relabel and reset all counters and the baseline so the
     /// next phase starts from zero.
-    mutating func beginPhase(_ label: String) {
+    func beginPhase(_ label: String) {
         phaseLabel = label
         currentSize = 0
         totalSize = 0
@@ -54,9 +74,28 @@ struct OperationProgress {
     }
 
     /// Fold a batch of progress events into the byte counts, then update the
-    /// displayed fraction per the monotonic rule. Event descriptions are ignored
-    /// on purpose — the model owns the phase label so it stays stable.
-    mutating func apply(_ events: [ProgressUpdateEvent]) {
+    /// displayed fraction per the monotonic rule. An "unpack" description flips
+    /// into the unpack phase (label only, byte events suppressed) — see
+    /// `unpacking`.
+    func apply(_ events: [ProgressUpdateEvent]) {
+        // Detect the unpack phase boundary first. Once entered, byte counters are
+        // CLI-reset and meaningless — keep only the phase label from then on.
+        for event in events {
+            if case .setDescription(let desc) = event, desc.lowercased().contains("unpack") {
+                unpacking = true
+                beginPhase(desc)
+            }
+        }
+
+        if unpacking {
+            for event in events {
+                if case .setDescription(let desc) = event {
+                    phaseLabel = desc
+                }
+            }
+            return
+        }
+
         let previousTotal = totalSize
         for event in events {
             switch event {

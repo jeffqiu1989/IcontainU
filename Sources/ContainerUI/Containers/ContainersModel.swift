@@ -196,7 +196,7 @@ final class ContainersModel {
 
         let platform = try? Platform(from: "linux/\(Arch.hostArchitecture().rawValue)")
         let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
-        var progress = OperationProgress()
+        let progress = OperationProgress()
         progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
         pulling = progress
         defer { pulling = nil }
@@ -235,7 +235,6 @@ final class ContainersModel {
     }
 
     private func applyPullProgress(_ events: [ProgressUpdateEvent]) {
-        guard pulling != nil else { return }
         pulling?.apply(events)
     }
 
@@ -310,7 +309,6 @@ final class ContainersModel {
     }
 
     private func applyProgress(_ events: [ProgressUpdateEvent]) {
-        guard creating != nil else { return }
         creating?.apply(events)
     }
 }

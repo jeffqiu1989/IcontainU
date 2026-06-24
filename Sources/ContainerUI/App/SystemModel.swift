@@ -104,7 +104,6 @@ final class SystemModel {
         actionError = nil
         kernelError = nil
         kernelProgress = nil
-        kernelUnpacking = false
         defer { isBusy = false; statusHint = nil }
 
         // Kernel already present → just start.
@@ -158,7 +157,6 @@ final class SystemModel {
         kernelTask?.cancel()
         kernelTask = nil
         kernelProgress = nil
-        kernelUnpacking = false
         kernelError = nil
         isBusy = true
         actionError = nil
@@ -209,10 +207,8 @@ final class SystemModel {
         do { config = try await SystemConfig.load() }
         catch { kernelError = (title: "Kernel download failed", message: error.localizedDescription); return }
 
-        var progress = OperationProgress()
-        progress.phaseLabel = "Downloading kernel…"
+        let progress = OperationProgress(phaseLabel: "Downloading kernel…")
         kernelProgress = progress
-        kernelUnpacking = false
         defer { kernelProgress = nil }
 
         do {
@@ -250,9 +246,7 @@ final class SystemModel {
         let platform = SystemPlatform.current
 
         if kernelProgress == nil {
-            var progress = OperationProgress()
-            progress.phaseLabel = "Downloading kernel via mirror…"
-            kernelProgress = progress
+            kernelProgress = OperationProgress(phaseLabel: "Downloading kernel via mirror…")
         }
         defer { kernelProgress = nil }
 
@@ -286,50 +280,18 @@ final class SystemModel {
             message: "Could not download the kernel from any mirror. Check your network.\n\n\(lastError?.localizedDescription ?? "unknown error")")
     }
 
-    /// True once the download phase is done and we've switched to unpacking.
-    /// While unpacking, byte counters are hidden (the CLI resets them during
-    /// the phase transition, causing confusing number jumps).
-    private var kernelUnpacking = false
-
-    /// Throttle: last time the progress UI was updated.
-    private var lastProgressUpdate: Date = .distantPast
-
     private func applyKernelProgress(_ events: [ProgressUpdateEvent]) {
-        guard var p = kernelProgress else { return }
-
-        // Detect unpack phase — once started, suppress byte counter updates.
-        for event in events {
-            if case .setDescription(let desc) = event, desc.lowercased().contains("unpack") {
-                kernelUnpacking = true
-                p.beginPhase(desc)
-            }
-        }
-
-        if kernelUnpacking {
-            // Only update phase label, ignore byte events.
-            for event in events {
-                if case .setDescription(let desc) = event {
-                    p.phaseLabel = desc
-                }
-            }
-        } else {
-            // Download phase — apply byte progress normally.
-            p.apply(events)
-        }
-
-        // Throttle UI updates to at most once per second to prevent flickering.
-        let now = Date()
-        guard now.timeIntervalSince(lastProgressUpdate) >= 1.0 else { return }
-        lastProgressUpdate = now
-
-        kernelProgress = p
+        // The phase/byte logic lives on `OperationProgress` (including the
+        // kernel's unpack-phase byte suppression). In-place mutation means there
+        // is no copy to forget to write back — the bug that previously left the
+        // bar reading as indeterminate while the download actually ran.
+        kernelProgress?.apply(events)
     }
 
     func cancelKernelDownload() {
         kernelTask?.cancel()
         kernelTask = nil
         kernelProgress = nil
-        kernelUnpacking = false
         isBusy = false
         statusHint = nil
         kernelError = (
@@ -350,7 +312,6 @@ final class SystemModel {
         kernelTask?.cancel()
         kernelTask = nil
         kernelProgress = nil
-        kernelUnpacking = false
         kernelError = nil
         // Now start fresh — guard !isBusy in startSystem() was blocking because
         // the old task's defer hasn't run yet. Reset it here since we're taking over.

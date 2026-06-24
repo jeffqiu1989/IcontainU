@@ -98,7 +98,7 @@ final class ImagesModel {
         let platform = currentLinuxPlatform
         let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
 
-        var progress = OperationProgress()
+        let progress = OperationProgress()
         progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
         pull = progress
         defer { pull = nil }
@@ -138,7 +138,6 @@ final class ImagesModel {
     }
 
     private func applyProgress(_ events: [ProgressUpdateEvent]) {
-        guard pull != nil else { return }
         pull?.apply(events)
     }
 }
