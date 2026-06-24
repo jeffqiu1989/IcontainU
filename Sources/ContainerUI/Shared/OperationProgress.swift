@@ -28,17 +28,38 @@ import TerminalProgress
 /// chose not to write back (a throttle-on-read bug that made the kernel download
 /// bar read as indeterminate). `InlineProgressBar` observes the instance directly,
 /// so a property change drives the UI without the owning model re-publishing it.
+///
+/// **Publish throttling.** Raw byte counts always accumulate into private fields
+/// on every event (so nothing is ever lost — the distinction from the old bug).
+/// The *observed* properties the view reads are only refreshed at most once per
+/// `publishInterval`, so the numbers tick at a calm, readable rate instead of
+/// flickering many times a second. Phase changes and reaching 100% publish
+/// immediately so the bar never looks stuck or stalls short of done.
 @Observable
 @MainActor
 final class OperationProgress {
     /// Human-facing phase label, set at each phase boundary
-    /// (e.g. "Pulling nginx:latest…", "Unpacking…").
+    /// (e.g. "Pulling nginx:latest…", "Unpacking…"). Published immediately.
     var phaseLabel: String
+
+    /// Observed byte counts and fraction the view renders. These lag the raw
+    /// accumulators below by at most `publishInterval` (see `publishIfDue`).
     private(set) var currentSize: Int64 = 0
     private(set) var totalSize: Int64 = 0
-
-    /// The fraction the bar draws. See the type doc for the monotonic rule.
     private(set) var displayedFraction: Double = 0
+
+    /// Raw accumulators updated on every event. The published properties above
+    /// are synced from these on a throttle. Keeping accumulation separate from
+    /// publishing is what makes throttling safe: skipping a publish never drops
+    /// bytes, it only defers showing them.
+    private var rawCurrentSize: Int64 = 0
+    private var rawTotalSize: Int64 = 0
+    private var rawFractionValue: Double = 0
+    private var lastPublish: Date = .distantPast
+
+    /// Minimum spacing between UI publishes — ~4 updates/second reads as smooth
+    /// without flickering digits.
+    private static let publishInterval: TimeInterval = 0.25
 
     /// Totals below this are just manifests/configs, not real payload — treat as
     /// indeterminate so a fully-fetched tiny manifest doesn't read as 100%.
@@ -55,28 +76,26 @@ final class OperationProgress {
         self.phaseLabel = phaseLabel
     }
 
-    /// The instantaneous fraction implied by the byte counts (0 when no total).
-    var rawFraction: Double {
-        guard totalSize > 0 else { return 0 }
-        return min(1.0, Double(currentSize) / Double(totalSize))
-    }
-
     /// True once the real payload total is known and a percentage is meaningful.
     var isDeterminate: Bool { totalSize >= Self.determinateFloor }
 
     /// Begin a new phase: relabel and reset all counters and the baseline so the
-    /// next phase starts from zero.
+    /// next phase starts from zero. Publishes immediately so the new phase shows
+    /// without waiting on the throttle.
     func beginPhase(_ label: String) {
         phaseLabel = label
+        rawCurrentSize = 0
+        rawTotalSize = 0
+        rawFractionValue = 0
         currentSize = 0
         totalSize = 0
         displayedFraction = 0
+        lastPublish = .distantPast
     }
 
-    /// Fold a batch of progress events into the byte counts, then update the
-    /// displayed fraction per the monotonic rule. An "unpack" description flips
-    /// into the unpack phase (label only, byte events suppressed) — see
-    /// `unpacking`.
+    /// Fold a batch of progress events into the raw byte counts, then publish to
+    /// the observed properties on a throttle. An "unpack" description flips into
+    /// the unpack phase (label only, byte events suppressed) — see `unpacking`.
     func apply(_ events: [ProgressUpdateEvent]) {
         // Detect the unpack phase boundary first. Once entered, byte counters are
         // CLI-reset and meaningless — keep only the phase label from then on.
@@ -96,21 +115,41 @@ final class OperationProgress {
             return
         }
 
-        let previousTotal = totalSize
+        let previousTotal = rawTotalSize
         for event in events {
             switch event {
-            case .setTotalSize(let value): totalSize = value
-            case .addTotalSize(let value): totalSize += value
-            case .setSize(let value): currentSize = value
-            case .addSize(let value): currentSize += value
+            case .setTotalSize(let value): rawTotalSize = value
+            case .addTotalSize(let value): rawTotalSize += value
+            case .setSize(let value): rawCurrentSize = value
+            case .addSize(let value): rawCurrentSize += value
             default: break
             }
         }
-        if totalSize > previousTotal {
+        let raw = rawTotalSize > 0 ? min(1.0, Double(rawCurrentSize) / Double(rawTotalSize)) : 0
+        if rawTotalSize > previousTotal {
             // Denominator changed — recompute honestly rather than lock high.
-            displayedFraction = rawFraction
+            rawFractionValue = raw
         } else {
-            displayedFraction = max(displayedFraction, rawFraction)
+            rawFractionValue = max(rawFractionValue, raw)
         }
+
+        publishIfDue()
+    }
+
+    /// Sync the observed properties from the raw accumulators, but only once per
+    /// `publishInterval`. Three cases publish immediately regardless of the
+    /// throttle: crossing the determinate floor (so the bar switches from spinner
+    /// to a real percentage promptly), reaching 100% (so it never stalls at 99%),
+    /// and the first publish of a phase (`lastPublish` reset to `.distantPast`).
+    private func publishIfDue() {
+        let now = Date()
+        let crossedFloor = totalSize < Self.determinateFloor && rawTotalSize >= Self.determinateFloor
+        let completed = rawFractionValue >= 1.0 && displayedFraction < 1.0
+        guard crossedFloor || completed || now.timeIntervalSince(lastPublish) >= Self.publishInterval
+        else { return }
+        lastPublish = now
+        currentSize = rawCurrentSize
+        totalSize = rawTotalSize
+        displayedFraction = rawFractionValue
     }
 }
