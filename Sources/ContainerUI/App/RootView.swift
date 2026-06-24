@@ -15,13 +15,11 @@ struct RootView: View {
                     .background(.bar)
                 }
         } detail: {
-            detail
-                .disabled(!system.isRunning)
-                .overlay {
-                    if !system.isRunning {
-                        SystemUnavailableOverlay()
-                    }
-                }
+            if system.isRunning {
+                detail
+            } else {
+                SystemUnavailableOverlay()
+            }
         }
         .task {
             await system.startMonitoring()

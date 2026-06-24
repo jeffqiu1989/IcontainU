@@ -9,6 +9,7 @@ struct SystemStatusBar: View {
     private var indicatorColor: Color {
         switch system.state {
         case .running: .green
+        case .readyButNoKernel: .yellow
         case .unavailable: .orange
         case .notInstalled: .red
         case .unknown: .secondary
@@ -18,6 +19,7 @@ struct SystemStatusBar: View {
     private var label: String {
         switch system.state {
         case .running: return "System running"
+        case .readyButNoKernel: return "Kernel not installed"
         case .unavailable: return "System not running"
         case .notInstalled: return "Not installed"
         case .unknown: return "Checking…"
@@ -62,7 +64,7 @@ struct SystemStatusBar: View {
                 button("stop.fill", help: "Stop system") {
                     Task { await system.stopSystem() }
                 }
-            case .unavailable:
+            case .readyButNoKernel, .unavailable:
                 button("play.fill", help: "Start system") {
                     Task { await system.startSystem() }
                 }
@@ -107,32 +109,57 @@ struct SystemUnavailableOverlay: View {
             } else {
                 Text("The container system is not running.")
                     .font(.headline)
-                Button {
-                    Task { await system.startSystem() }
-                } label: {
-                    if system.isBusy {
-                        VStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            if let hint = system.statusHint {
-                                Text(hint)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
+                if system.isBusy {
+                    if let progress = system.kernelProgress {
+                        InlineProgressBar(
+                            progress: progress,
+                            accent: .orange,
+                            onCancel: { system.cancelKernelDownload() })
+                        .padding(.horizontal, 40)
+                    }
+                    if let hint = system.statusHint {
+                        Text(hint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button {
+                        Task { await system.startSystem() }
+                    } label: {
                         Text("Start System")
                     }
+                    .controlSize(.large)
                 }
-                .controlSize(.large)
-                .disabled(system.isBusy)
-            }
-
-            if let error = system.actionError {
-                ErrorBanner(error: error, onDismiss: { system.clearActionError() })
-                    .padding(.horizontal, 40)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background.opacity(0.92))
+        .background(.background)
+        .alert(
+            system.kernelError?.title ?? "",
+            isPresented: Binding(
+                get: { system.kernelError != nil },
+                set: { if !$0 { system.clearKernelError() } }),
+            presenting: system.kernelError
+        ) { _ in
+            Button("Cancel", role: .cancel) { system.clearKernelError() }
+            Button("Retry") { system.retryKernelDownload() }
+        } message: { error in
+            Text(error.message)
+        }
+        .alert(
+            system.actionError?.title ?? "",
+            isPresented: Binding(
+                get: { system.actionError != nil },
+                set: { if !$0 { system.clearActionError() } }),
+            presenting: system.actionError
+        ) { error in
+            Button("OK") {}
+            Button("Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(error.copyText, forType: .string)
+            }
+        } message: { error in
+            Text(error.detail)
+        }
     }
 }

@@ -36,12 +36,21 @@ enum MirrorPull {
             // The image exists, but the requested platform may not be pulled — a
             // missing platform throws `.notFound` and routes us to the pull below.
             if let platform {
-                _ = try await existing.config(for: platform)
+                do {
+                    _ = try await existing.config(for: platform)
+                } catch {
+                    log.debug(
+                        "image present but platform config missing, will re-pull",
+                        metadata: ["reference": "\(canonical)", "platform": "\(platform)", "error": "\(error)"])
+                    throw error
+                }
             }
             log.debug("image present locally, skipping pull", metadata: ["reference": "\(canonical)"])
             return existing
         } catch let error as ContainerizationError where error.code == .notFound {
-            log.debug("image not local, pulling", metadata: ["reference": "\(canonical)"])
+            log.info(
+                "image not local or platform missing, pulling",
+                metadata: ["reference": "\(canonical)", "original": "\(originalReference)", "error": "\(error)"])
         }
         return try await pull(
             originalReference: originalReference,

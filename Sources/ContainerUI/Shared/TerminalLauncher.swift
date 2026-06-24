@@ -70,13 +70,30 @@ enum TerminalLauncher {
         return FileManager.default.fileExists(atPath: kernelPath)
     }
 
-    /// Start the container system silently (no Terminal). Kernel install is
-    /// enabled so that first-time setups automatically download the kernel.
-    /// On subsequent starts the upstream CLI skips the download if a kernel
-    /// already exists. Throws with stderr on failure.
-    static func startSystem() throws {
+    /// Kernel install strategy for `system start`.
+    enum KernelInstallMode {
+        /// `--enable-kernel-install`: let the CLI download the kernel from GitHub.
+        case auto
+        /// `--disable-kernel-install`: bring up apiserver without a kernel, so the
+        /// GUI can install it afterwards via a mirror (with progress).
+        case skip
+        /// No flag: kernel is already present, just start.
+        case none
+    }
+
+    /// Start the container system silently (no Terminal). The kernel install
+    /// strategy controls whether the CLI downloads the default kernel itself,
+    /// skips it (so the GUI installs via a mirror), or assumes it's present.
+    /// Throws with stderr on failure.
+    static func startSystem(kernelInstall: KernelInstallMode = .none) throws {
         let bin = try binaryPath()
-        try runSilently([bin, "system", "start", "--enable-kernel-install"])
+        var args = [bin, "system", "start"]
+        switch kernelInstall {
+        case .auto: args.append("--enable-kernel-install")
+        case .skip: args.append("--disable-kernel-install")
+        case .none: break
+        }
+        try runSilently(args)
     }
 
     /// Stop the container system silently (no Terminal).

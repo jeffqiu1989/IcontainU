@@ -27,6 +27,7 @@ let package = Package(
                 // product `ContainerImagesService` re-exports the `ContainerImagesServiceClient` target.
                 .product(name: "ContainerImagesService", package: "container"),
                 .product(name: "TerminalProgress", package: "container"),
+                .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationOCI", package: "containerization"),
                 .product(name: "ContainerizationArchive", package: "containerization"),
                 .product(name: "Logging", package: "swift-log"),
