@@ -69,6 +69,27 @@ enum ContainerCreateEngine {
             progressUpdate: fetchHandler)
         log.debug("image ready", metadata: ["reference": "\(image.reference)"])
 
+        // Resolve the init image (vminit) local-first + mirror-aware, exactly as
+        // for the user image above. `Utility.containerConfigFromFlags` later
+        // calls Apple's non-mirror `ClientImage.fetch` on `config.vminit.image`;
+        // without this pre-pull that hits ghcr.io directly (blocked/slow in
+        // mainland China, and fails offline). `fetchInfraImage` additionally
+        // falls back to built-in ghcr.io mirrors (DaoCloud, 1ms.run) when the
+        // user has no ghcr mapping configured — so a fresh install with an empty
+        // Registries tab can still fetch the init image. `vminit.image` is not
+        // reference-normalized (`normalizeReference` returns it unchanged), so
+        // the canonical reference we cache under is identical to what
+        // `containerConfigFromFlags` will look up — its later fetch finds it
+        // local and skips the registry round-trip.
+        let initImageRef = config.vminit.image
+        let initFetchHandler = await beginPhase("Fetching init image…")
+        _ = try await MirrorPull.fetchInfraImage(
+            originalReference: initImageRef,
+            platform: .current,
+            config: config,
+            progressUpdate: initFetchHandler)
+        log.debug("init image ready", metadata: ["reference": "\(initImageRef)"])
+
         let flags = makeFlags(spec: spec)
         log.debug(
             "assembled flags",

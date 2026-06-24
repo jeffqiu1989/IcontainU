@@ -14,6 +14,15 @@ import TerminalProgress
 enum MirrorPull {
     private static let log = Logger(label: "icontainu.mirror")
 
+    /// Built-in ghcr.io mirrors tried as a last resort for infrastructure images
+    /// (e.g. the vminit init image) when the user has no ghcr.io mapping
+    /// configured, or the configured one is unreachable. Infrastructure images
+    /// are required for the app to function, so they get blessed mirrors
+    /// independent of the user's `RegistryMirrorStore` — mirroring how the
+    /// kernel download falls back to a fixed set of GitHub proxies. A fresh
+    /// install with no registry mirrors must still be able to create a container.
+    private static let blessedGHCRMirrors = ["ghcr.m.daocloud.io", "ghcr.1ms.run"]
+
     /// Local-first variant of `pull`: return the already-present image when the
     /// canonical reference (with the requested platform) is in the local store,
     /// otherwise fall back to a mirror-aware `pull`.
@@ -59,6 +68,94 @@ enum MirrorPull {
             progressUpdate: progressUpdate)
     }
 
+    /// Resolve an infrastructure image (one the app needs to function, e.g. the
+    /// vminit init image) local-first, honoring the user's registry mirrors,
+    /// then falling back to the built-in ghcr.io mirrors above.
+    ///
+    /// Unlike `fetch` (used for user images, which respect the user's mirror
+    /// config and fail otherwise), infrastructure images must be obtainable on a
+    /// fresh install with no mirrors configured. So a failure of the primary
+    /// fetch — image not local AND the user's configured mirror (or a direct
+    /// pull) unreachable — triggers the blessed mirrors.
+    @MainActor
+    static func fetchInfraImage(
+        originalReference: String,
+        platform: Platform?,
+        config: ContainerSystemConfig,
+        progressUpdate: ProgressUpdateHandler?
+    ) async throws -> ClientImage {
+        // Local-first + the user's configured mirrors. Returns immediately when
+        // the image is already cached, so the blessed fallback never runs on the
+        // hot path. A throw means the image isn't local and the configured mirror
+        // (or a direct pull) couldn't reach it — try the blessed mirrors below.
+        var primaryError: Error?
+        do {
+            return try await fetch(
+                originalReference: originalReference,
+                platform: platform,
+                config: config,
+                progressUpdate: progressUpdate)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            primaryError = error
+            log.info(
+                "infra image not reachable via user config, trying blessed ghcr mirrors",
+                metadata: ["reference": "\(originalReference)", "error": "\(error)"])
+        }
+
+        // Blessed mirrors only apply to ghcr.io sources — rewriting a non-ghcr
+        // reference to a ghcr mirror would point at the wrong image. A non-ghcr
+        // infra image (unusual) surfaces the primary failure directly.
+        var lastError = primaryError
+        for mirror in blessedGHCRMirrors {
+            guard let mirrorReference = rewriteGHCR(originalReference, to: mirror) else { continue }
+            do {
+                log.info(
+                    "pulling infra image via blessed mirror",
+                    metadata: ["reference": "\(originalReference)", "mirror": "\(mirror)"])
+                return try await pullViaMirror(
+                    originalReference: originalReference,
+                    mirrorReference: mirrorReference,
+                    platform: platform,
+                    config: config,
+                    progressUpdate: progressUpdate)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                log.warning(
+                    "blessed mirror failed, trying next",
+                    metadata: ["mirror": "\(mirror)", "error": "\(error)"])
+                lastError = error
+            }
+        }
+
+        // All mirrors failed (or the reference wasn't ghcr). Surface the last
+        // failure so the user sees why rather than a generic error.
+        throw lastError ?? ContainerizationError(
+            .internalError,
+            message: "unable to fetch infra image \(originalReference)")
+    }
+
+    /// Rewrite a ghcr.io reference to use `mirror` as its domain, preserving the
+    /// path and tag/digest. Returns nil if the reference isn't a ghcr.io source
+    /// (blessed mirrors only apply to ghcr.io). Mirrors `RegistryMirrorStore`'s
+    /// rewrite but with a fixed mirror instead of a user-configured mapping.
+    private static func rewriteGHCR(_ reference: String, to mirror: String) -> String? {
+        let trimmed = reference.trimmingCharacters(in: .whitespaces)
+        guard let parsed = try? Reference.parse(trimmed),
+            let domain = parsed.domain,
+            domain.caseInsensitiveCompare("ghcr.io") == .orderedSame
+        else { return nil }
+        var result = "\(mirror)/\(parsed.path)"
+        if let tag = parsed.tag {
+            result += ":\(tag)"
+        } else if let digest = parsed.digest {
+            result += "@\(digest)"
+        }
+        return result
+    }
+
     /// Fetch a reference, routing through a mirror when one is configured, and
     /// return the resulting image under its canonical (mirror-free) reference.
     ///
@@ -89,7 +186,27 @@ enum MirrorPull {
                 progressUpdate: progressUpdate)
         }
 
-        // Pull via the mirror for acceleration.
+        // Pull via the mirror for acceleration, then retag to the canonical
+        // original reference and drop the mirror-named tag.
+        return try await pullViaMirror(
+            originalReference: originalReference,
+            mirrorReference: mirrorReference,
+            platform: platform,
+            config: config,
+            progressUpdate: progressUpdate)
+    }
+
+    /// Pull via a specific mirror reference, then retag the result back to the
+    /// canonical (mirror-free) original reference and drop the mirror-named tag
+    /// so it does not linger as a duplicate. Shared by `pull` (the user's
+    /// configured mirror) and `fetchInfraImage` (the built-in blessed mirrors).
+    private static func pullViaMirror(
+        originalReference: String,
+        mirrorReference: String,
+        platform: Platform?,
+        config: ContainerSystemConfig,
+        progressUpdate: ProgressUpdateHandler?
+    ) async throws -> ClientImage {
         let pulled = try await pullAndValidate(
             reference: mirrorReference, platform: platform, config: config,
             progressUpdate: progressUpdate)
