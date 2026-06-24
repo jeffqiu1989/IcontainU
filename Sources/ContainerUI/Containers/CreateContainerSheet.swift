@@ -126,7 +126,8 @@ struct CreateContainerSheet: View {
                         .onChange(of: form.image) { _, _ in highlightedSuggestion = 0 }
                         .onChange(of: imageFieldFocused) { _, _ in highlightedSuggestion = 0 }
                     if let progress = model.pulling {
-                        InlineProgressBar(progress: progress, accent: Palette.containers)
+                        InlineProgressBar(progress: progress, accent: Palette.containers,
+                                          onCancel: { model.cancelPull() })
                     }
                     if suggestionsVisible {
                         suggestionList
@@ -432,7 +433,8 @@ struct CreateContainerSheet: View {
         model.clearError()
         Task { @MainActor in
             if !model.isImageLocal(image) {
-                guard await model.pullForCreate(reference: image) else {
+                model.startPullForCreate(reference: image)
+                guard await model.pullForCreateTask?.value == true else {
                     pullError = model.lastError
                     model.clearError()
                     return

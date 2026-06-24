@@ -10,6 +10,7 @@ import SwiftUI
 struct InlineProgressBar: View {
     let progress: OperationProgress
     var accent: Color = .accentColor
+    var onCancel: (() -> Void)?
 
     private static let byteFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -40,7 +41,18 @@ struct InlineProgressBar: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            bar
+            HStack(spacing: 8) {
+                bar
+                if let onCancel {
+                    Button(action: onCancel) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel")
+                    .foregroundStyle(.red)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)

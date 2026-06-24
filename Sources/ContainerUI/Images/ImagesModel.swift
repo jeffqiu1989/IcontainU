@@ -14,6 +14,7 @@ final class ImagesModel {
     /// Failure of an explicit action (pull/delete): never cleared by polling.
     private(set) var lastError: OperationError?
     private(set) var pull: OperationProgress?
+    private var pullTask: Task<Void, Never>?
 
     func clearError() { lastError = nil }
 
@@ -71,13 +72,25 @@ final class ImagesModel {
         try? Platform(from: "linux/\(Arch.hostArchitecture().rawValue)")
     }
 
+    func cancelPull() {
+        pullTask?.cancel()
+        pull = nil
+    }
+
+    func startPullImage(reference: String) {
+        cancelPull()
+        pullTask = Task { [weak self] in
+            await self?._pullImage(reference: reference)
+        }
+    }
+
     /// Pulls a reference and unpacks it (matching the CLI), reporting progress.
     ///
     /// Fetch and unpack are coordinated as two distinct phases: a
     /// `ProgressTaskCoordinator` makes the fetch task non-current the instant
     /// unpack begins, so any late fetch events are dropped instead of bumping
     /// the unpack bar — the same technique the CLI uses to keep progress stable.
-    func pullImage(reference: String) async {
+    private func _pullImage(reference: String) async {
         let trimmed = reference.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
@@ -110,6 +123,8 @@ final class ImagesModel {
                 platform: platform,
                 progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
             await refresh()
+        } catch is CancellationError {
+            // User cancelled — not an error. defer sets pull = nil.
         } catch {
             lastError = .from("Failed to pull image", error: error)
         }

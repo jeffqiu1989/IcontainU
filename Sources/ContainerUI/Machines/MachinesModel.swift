@@ -18,6 +18,7 @@ final class MachinesModel {
     private(set) var lastError: OperationError?
     private(set) var creating: OperationProgress?
     private(set) var busyItemIDs: Set<String> = []
+    private var createTask: Task<Void, Never>?
 
     func clearError() { lastError = nil }
 
@@ -96,7 +97,29 @@ final class MachinesModel {
     /// the canonical reference). Assembles the config inline rather than via the
     /// CLI's `machineConfigFromFlags`, whose ArgumentParser `Flags` types crash
     /// when constructed outside of command-line parsing.
-    func create(
+    func cancelCreate() {
+        createTask?.cancel()
+        creating = nil
+    }
+
+    func startCreate(
+        image: String,
+        name: String?,
+        cpus: Int?,
+        memory: String?,
+        homeMount: String?,
+        setAsDefault: Bool,
+        noBoot: Bool
+    ) {
+        cancelCreate()
+        createTask = Task { [weak self] in
+            await self?._create(
+                image: image, name: name, cpus: cpus, memory: memory,
+                homeMount: homeMount, setAsDefault: setAsDefault, noBoot: noBoot)
+        }
+    }
+
+    private func _create(
         image: String,
         name: String?,
         cpus: Int?,
@@ -171,6 +194,8 @@ final class MachinesModel {
                 _ = try await client.boot(id: id)
             }
             await refresh()
+        } catch is CancellationError {
+            // User cancelled — not an error. defer sets creating = nil.
         } catch {
             lastError = .from("Failed to create machine", error: error)
         }

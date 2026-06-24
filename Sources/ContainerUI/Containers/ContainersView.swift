@@ -27,7 +27,8 @@ struct ContainersView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let progress = model.creating {
-                InlineProgressBar(progress: progress, accent: Palette.containers)
+                InlineProgressBar(progress: progress, accent: Palette.containers,
+                                  onCancel: { model.cancelCreate() })
             }
             if let error = model.lastError {
                 ErrorBanner(
@@ -54,6 +55,7 @@ struct ContainersView: View {
                     Label("Create Container", systemImage: "plus")
                 }
                 .help("Create a new container")
+                .disabled(model.creating != nil)
             }
         }
         .task {
@@ -65,7 +67,7 @@ struct ContainersView: View {
                 volumes: model.availableVolumes,
                 networks: model.availableNetworks,
                 onCreate: { spec in
-                    Task { await model.create(spec: spec) }
+                    model.startCreate(spec: spec)
                 }
             )
             .task { await model.loadCreateResources() }

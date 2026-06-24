@@ -22,7 +22,8 @@ struct ImagesView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let pull = model.pull {
-                InlineProgressBar(progress: pull, accent: Palette.images)
+                InlineProgressBar(progress: pull, accent: Palette.images,
+                                  onCancel: { model.cancelPull() })
             }
             if let error = model.lastError {
                 ErrorBanner(error: error, onDismiss: { model.clearError() })
@@ -48,7 +49,7 @@ struct ImagesView: View {
         }
         .sheet(isPresented: $showPullSheet) {
             PullImageSheet { reference in
-                Task { await model.pullImage(reference: reference) }
+                model.startPullImage(reference: reference)
             }
         }
         .confirmationDialog(

@@ -15,6 +15,7 @@ final class ContainersModel {
     private(set) var lastError: OperationError?
     private(set) var creating: OperationProgress?
     private(set) var busyItemIDs: Set<String> = []
+    private var createTask: Task<Void, Never>?
 
     func clearError() { lastError = nil }
 
@@ -27,6 +28,8 @@ final class ContainersModel {
     private(set) var availableImages: [String] = []
     /// Progress for an image pull triggered from the create form (Pull button).
     private(set) var pulling: OperationProgress?
+    private var pullTask: Task<Bool, Never>?
+    private(set) var pullForCreateTask: Task<Bool, Never>?
 
     // Build a fresh client (and XPC connection) per use. The Apple clients cache
     // their XPC connection for the object's lifetime; a long-lived cached
@@ -172,7 +175,21 @@ final class ContainersModel {
 
     /// Pull (and unpack) an image for the create form, reporting progress on
     /// `pulling`. Returns true on success so the caller can then analyze it.
-    func pullForCreate(reference: String) async -> Bool {
+    func cancelPull() {
+        pullTask?.cancel()
+        pulling = nil
+    }
+
+    func startPullForCreate(reference: String) {
+        cancelPull()
+        let task = Task<Bool, Never> { [weak self] in
+            await self?._pullForCreate(reference: reference) ?? false
+        }
+        pullTask = task
+        pullForCreateTask = task
+    }
+
+    private func _pullForCreate(reference: String) async -> Bool {
         let trimmed = reference.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
         lastError = nil
@@ -202,6 +219,9 @@ final class ContainersModel {
                 progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: pullProgressHandler))
             await refreshAvailableImages()
             return true
+        } catch is CancellationError {
+            // User cancelled — not an error. defer sets pulling = nil.
+            return false
         } catch {
             lastError = .from("Failed to pull image", error: error)
             return false
@@ -223,7 +243,19 @@ final class ContainersModel {
     /// two coordinated phases (see `pullImage` for the rationale): late events
     /// from the finished fetch phase are dropped instead of disturbing the
     /// prepare bar, and each phase is labeled explicitly.
-    func create(spec: ContainerCreateSpec) async {
+    func cancelCreate() {
+        createTask?.cancel()
+        creating = nil
+    }
+
+    func startCreate(spec: ContainerCreateSpec) {
+        cancelCreate()
+        createTask = Task { [weak self] in
+            await self?._create(spec: spec)
+        }
+    }
+
+    private func _create(spec: ContainerCreateSpec) async {
         lastError = nil
         creating = OperationProgress()
         defer { creating = nil }
@@ -236,6 +268,8 @@ final class ContainersModel {
             await coordinator.finish()
             await refresh()
             await reportIfStopped(id: id)
+        } catch is CancellationError {
+            await coordinator.finish()
         } catch {
             await coordinator.finish()
             lastError = .from("Failed to create container", error: error)

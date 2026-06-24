@@ -19,7 +19,8 @@ struct MachinesView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let creating = model.creating {
-                InlineProgressBar(progress: creating, accent: Palette.machines)
+                InlineProgressBar(progress: creating, accent: Palette.machines,
+                                  onCancel: { model.cancelCreate() })
             }
             if let error = model.lastError {
                 ErrorBanner(
@@ -53,16 +54,14 @@ struct MachinesView: View {
         }
         .sheet(isPresented: $showCreateSheet) {
             CreateMachineSheet { spec in
-                Task {
-                    await model.create(
-                        image: spec.image,
-                        name: spec.name,
-                        cpus: spec.cpus,
-                        memory: spec.memory,
-                        homeMount: spec.homeMount,
-                        setAsDefault: spec.setAsDefault,
-                        noBoot: spec.noBoot)
-                }
+                model.startCreate(
+                    image: spec.image,
+                    name: spec.name,
+                    cpus: spec.cpus,
+                    memory: spec.memory,
+                    homeMount: spec.homeMount,
+                    setAsDefault: spec.setAsDefault,
+                    noBoot: spec.noBoot)
             }
         }
         .confirmationDialog(
