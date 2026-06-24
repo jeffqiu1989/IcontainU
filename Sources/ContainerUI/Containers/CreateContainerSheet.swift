@@ -83,7 +83,7 @@ struct CreateContainerSheet: View {
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
             Button("Create") {
-                onCreate(form.makeSpec())
+                onCreate(form.makeSpec(builtinNetworkName: networks.first { $0.isBuiltin }?.name))
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)

@@ -118,20 +118,34 @@ final class CreateContainerFormState {
     }
 
     /// Build the spec for the create engine.
-    func makeSpec() -> ContainerCreateSpec {
+    ///
+    /// `builtinNetworkName` is the id/name of the built-in default network, used
+    /// to resolve the "Default" rows. When the user attaches *only* the default
+    /// network we leave `spec.networks` empty — the server treats an empty list
+    /// as "attach the built-in default", which also keeps working on macOS < 26
+    /// where multiple networks aren't supported. But once the user adds a named
+    /// network alongside Default, the list is no longer empty, so the server only
+    /// attaches what's listed; the default must then be named explicitly or it
+    /// silently drops off.
+    func makeSpec(builtinNetworkName: String?) -> ContainerCreateSpec {
         var spec = ContainerCreateSpec(image: image.trimmingCharacters(in: .whitespaces))
         spec.name = name.isEmpty ? nil : name
         spec.command = CommandTokenizer.tokenize(command)
         spec.publishPorts = ports.compactMap(\.cliValue)
         spec.env = envs.compactMap(\.cliValue)
         spec.volumes = mounts.compactMap(\.cliValue)
-        // Map each row to a concrete network name. `.default` contributes nothing
-        // (an empty list means "use the built-in default network"); `.none` and
-        // named networks pass through. Duplicates are removed, order preserved.
+
+        // Resolve each row to a concrete network name. "None" wins outright. A
+        // "Default" row maps to the built-in network's name only when the final
+        // list would otherwise be non-empty (i.e. a named network is also
+        // attached); when Default is the only selection it contributes nothing,
+        // leaving the list empty so the server applies its default. Duplicates
+        // are removed, order preserved.
+        let hasNamed = networks.contains { if case .named = $0.selection { return true } else { return false } }
         var seen = Set<String>()
         spec.networks = networks.compactMap { row -> String? in
             switch row.selection {
-            case .default: return nil
+            case .default: return hasNamed ? builtinNetworkName : nil
             case .none: return "none"
             case .named(let name): return name
             }
