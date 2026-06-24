@@ -141,12 +141,21 @@ final class ContainersModel {
     }
 
     /// Refresh the local image suggestion list, denormalized for display and
-    /// deduplicated. Best effort.
+    /// deduplicated. Infrastructure images (vminit / builder) are filtered out so
+    /// they are never offered as a base image — matching the Images tab. Best effort.
     private func refreshAvailableImages() async {
-        guard let raw = try? await ClientImage.list() else { return }
+        guard let config = try? await SystemConfig.load(),
+            let raw = try? await ClientImage.list()
+        else { return }
         var seen = Set<String>()
         var refs: [String] = []
         for image in raw {
+            guard
+                !Utility.isInfraImage(
+                    name: image.reference,
+                    builderImage: config.build.image,
+                    initImage: config.vminit.image)
+            else { continue }
             let parsed = ParsedImageReference(image.reference)
             let display = parsed.tag.map { "\(parsed.repository):\($0)" } ?? parsed.repository
             guard seen.insert(display).inserted else { continue }
