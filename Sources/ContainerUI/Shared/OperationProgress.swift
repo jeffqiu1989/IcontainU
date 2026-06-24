@@ -65,15 +65,21 @@ final class OperationProgress {
     /// indeterminate so a fully-fetched tiny manifest doesn't read as 100%.
     private static let determinateFloor: Int64 = 1 << 20  // 1 MiB
 
-    /// Once an "unpack" phase is detected the CLI resets its byte counters, which
-    /// would make the bar jump backward. From then on we keep only the phase
-    /// label and suppress byte updates. `apply` flips this on the first
-    /// `setDescription` containing "unpack" and `beginPhase`s into it — the kernel
-    /// download relies on this; pulls/creates simply don't emit such a description.
+    /// When true, a `setDescription` containing "unpack" switches the bar into an
+    /// unpack phase: the label follows the description and byte events are
+    /// suppressed (the CLI resets its counters across that boundary, which would
+    /// otherwise make the bar jump backward). This is **opt-in** and only the
+    /// kernel download enables it. Image pull / container create leave it off so
+    /// their phase labels stay owned by the model — otherwise the init image's
+    /// "Unpacking init image" description would hijack the "Preparing container…"
+    /// label on every create, and pull's unpack-phase byte progress would be
+    /// suppressed.
+    private let tracksUnpackPhase: Bool
     private var unpacking = false
 
-    init(phaseLabel: String = "Preparing…") {
+    init(phaseLabel: String = "Preparing…", tracksUnpackPhase: Bool = false) {
         self.phaseLabel = phaseLabel
+        self.tracksUnpackPhase = tracksUnpackPhase
     }
 
     /// True once the real payload total is known and a percentage is meaningful.
@@ -94,25 +100,27 @@ final class OperationProgress {
     }
 
     /// Fold a batch of progress events into the raw byte counts, then publish to
-    /// the observed properties on a throttle. An "unpack" description flips into
-    /// the unpack phase (label only, byte events suppressed) — see `unpacking`.
+    /// the observed properties on a throttle. When `tracksUnpackPhase` is set, an
+    /// "unpack" description flips into the unpack phase (label only, byte events
+    /// suppressed) — see `tracksUnpackPhase`.
     func apply(_ events: [ProgressUpdateEvent]) {
-        // Detect the unpack phase boundary first. Once entered, byte counters are
-        // CLI-reset and meaningless — keep only the phase label from then on.
-        for event in events {
-            if case .setDescription(let desc) = event, desc.lowercased().contains("unpack") {
-                unpacking = true
-                beginPhase(desc)
-            }
-        }
-
-        if unpacking {
+        if tracksUnpackPhase {
+            // Detect the unpack phase boundary first. Once entered, byte counters
+            // are CLI-reset and meaningless — keep only the phase label.
             for event in events {
-                if case .setDescription(let desc) = event {
-                    phaseLabel = desc
+                if case .setDescription(let desc) = event, desc.lowercased().contains("unpack") {
+                    unpacking = true
+                    beginPhase(desc)
                 }
             }
-            return
+            if unpacking {
+                for event in events {
+                    if case .setDescription(let desc) = event {
+                        phaseLabel = desc
+                    }
+                }
+                return
+            }
         }
 
         let previousTotal = rawTotalSize

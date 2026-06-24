@@ -207,7 +207,7 @@ final class SystemModel {
         do { config = try await SystemConfig.load() }
         catch { kernelError = (title: "Kernel download failed", message: error.localizedDescription); return }
 
-        let progress = OperationProgress(phaseLabel: "Downloading kernel…")
+        let progress = OperationProgress(phaseLabel: "Downloading kernel…", tracksUnpackPhase: true)
         kernelProgress = progress
         defer { kernelProgress = nil }
 
@@ -246,7 +246,7 @@ final class SystemModel {
         let platform = SystemPlatform.current
 
         if kernelProgress == nil {
-            kernelProgress = OperationProgress(phaseLabel: "Downloading kernel via mirror…")
+            kernelProgress = OperationProgress(phaseLabel: "Downloading kernel via mirror…", tracksUnpackPhase: true)
         }
         defer { kernelProgress = nil }
 
