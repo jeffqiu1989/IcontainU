@@ -108,10 +108,13 @@ final class ImagesModel {
 
         do {
             let config = try await SystemConfig.load()
-            // Pull through any configured mirror, then retag to the canonical
-            // reference so the local image is mirror-free.
+            // Local-first: when the exact reference (with the host platform) is
+            // already present, return it without a registry round-trip — a pinned
+            // tag like alpine:3.24 never changes, so re-verifying over a slow
+            // network is wasted. Only a missing image goes out, through any
+            // configured mirror, then retagged to the canonical reference.
             let fetchTask = await coordinator.startTask()
-            let image = try await MirrorPull.pull(
+            let image = try await MirrorPull.fetch(
                 originalReference: trimmed,
                 platform: platform,
                 config: config,
