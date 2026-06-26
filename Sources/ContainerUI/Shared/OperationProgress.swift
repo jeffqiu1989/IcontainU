@@ -156,8 +156,15 @@ final class OperationProgress {
         guard crossedFloor || completed || now.timeIntervalSince(lastPublish) >= Self.publishInterval
         else { return }
         lastPublish = now
-        currentSize = rawCurrentSize
+        // Clamp the displayed current to the total: concurrent-layer downloads
+        // mix `set*`/`add*` size events whose set-vs-add asymmetry can leave the
+        // accumulated current above the total (one layer's `setTotalSize`
+        // overwriting the running total while each layer's `addSize` keeps
+        // accumulating). The fraction is already clamped to ≤1.0, so the percent
+        // and bar are correct — clamp the byte readout to match so it never shows
+        // "1.2 GB / 1.0 GB · 100%".
         totalSize = rawTotalSize
+        currentSize = min(rawCurrentSize, rawTotalSize)
         displayedFraction = rawFractionValue
     }
 }

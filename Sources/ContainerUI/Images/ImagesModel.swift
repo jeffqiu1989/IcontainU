@@ -15,6 +15,11 @@ final class ImagesModel {
     private(set) var lastError: OperationError?
     private(set) var pull: OperationProgress?
     private var pullTask: Task<Void, Never>?
+    /// Generation token guarding `pull` against superseded tasks — a cancelled
+    /// task's server-side pull can't be aborted, so its `defer` must not nil a
+    /// newer task's bar. Mirrors `MachinesModel.createGeneration`; see the plan
+    /// at `.claude/plans/pull-machine-wiggly-squirrel.md`.
+    private var pullGeneration = 0
 
     func clearError() { lastError = nil }
 
@@ -73,14 +78,16 @@ final class ImagesModel {
     }
 
     func cancelPull() {
+        pullGeneration &+= 1
         pullTask?.cancel()
         pull = nil
     }
 
     func startPullImage(reference: String) {
         cancelPull()
+        let generation = pullGeneration
         pullTask = Task { [weak self] in
-            await self?._pullImage(reference: reference)
+            await self?._pullImage(reference: reference, generation: generation)
         }
     }
 
@@ -90,7 +97,7 @@ final class ImagesModel {
     /// `ProgressTaskCoordinator` makes the fetch task non-current the instant
     /// unpack begins, so any late fetch events are dropped instead of bumping
     /// the unpack bar — the same technique the CLI uses to keep progress stable.
-    private func _pullImage(reference: String) async {
+    private func _pullImage(reference: String, generation: Int) async {
         let trimmed = reference.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
@@ -100,8 +107,18 @@ final class ImagesModel {
 
         let progress = OperationProgress()
         progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
+        // Only the current generation owns `pull`: a superseded task (cancelled but
+        // still running its server-side pull) must not set or clear it. Mirrors the
+        // `creating`/`pulling` guards in the machine/container models.
+        guard pullGeneration == generation else { return }
         pull = progress
-        defer { pull = nil }
+        defer { if pullGeneration == generation { pull = nil } }
+
+        // Apply events to OUR `progress`, not `self.pull`, so a stale task's late
+        // events land on an orphan nobody observes instead of the active bar.
+        let progressHandler: ProgressUpdateHandler = { [weak progress] events in
+            await progress?.apply(events)
+        }
 
         let coordinator = ProgressTaskCoordinator()
         defer { Task { await coordinator.finish() } }
@@ -120,28 +137,28 @@ final class ImagesModel {
                 config: config,
                 progressUpdate: ProgressTaskCoordinator.handler(for: fetchTask, from: progressHandler))
 
+            // The pull's XPC `send` does not abort on cancel, so check at the phase
+            // boundary before unpacking. See `MachinesModel._create` for rationale.
+            try Task.checkCancellation()
+
             let unpackTask = await coordinator.startTask()
-            pull?.beginPhase("Unpacking…")
+            progress.beginPhase("Unpacking…")
             try await image.unpack(
                 platform: platform,
                 progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
+            try Task.checkCancellation()
             await refresh()
         } catch is CancellationError {
             // User cancelled — not an error. defer sets pull = nil.
         } catch {
+            // A cancellation wrapped into `ContainerizationError(cause:
+            // CancellationError)` is also a user abort, not a failure. A superseded
+            // task resumed after its XPC call ignored cancellation must not clobber
+            // the active task's error — drop it.
+            guard pullGeneration == generation else { return }
+            guard !error.isCancellation else { return }
             lastError = .from("Failed to pull image", error: error)
         }
-    }
-
-    /// Folds the progress event stream into the shared `OperationProgress` state.
-    private var progressHandler: ProgressUpdateHandler {
-        { [weak self] events in
-            await self?.applyProgress(events)
-        }
-    }
-
-    private func applyProgress(_ events: [ProgressUpdateEvent]) {
-        pull?.apply(events)
     }
 }
 

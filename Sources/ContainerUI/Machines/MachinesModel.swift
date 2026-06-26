@@ -19,6 +19,14 @@ final class MachinesModel {
     private(set) var creating: OperationProgress?
     private(set) var busyItemIDs: Set<String> = []
     private var createTask: Task<Void, Never>?
+    /// Generation token guarding `creating` against superseded tasks. A cancel only
+    /// aborts the client-side await — the image pull's XPC send has no timeout and
+    /// its reply continuation ignores cancellation, so a cancelled task keeps
+    /// running its server-side pull to completion. Incrementing this on every
+    /// cancel/start invalidates in-flight tasks: their captured generation is then
+    /// stale, so their `defer` refuses to nil a newer task's `creating` slot. See
+    /// the plan at `.claude/plans/pull-machine-wiggly-squirrel.md`.
+    private var createGeneration = 0
 
     func clearError() { lastError = nil }
 
@@ -38,7 +46,18 @@ final class MachinesModel {
         do {
             async let list = client.list()
             async let def = client.getDefault()
-            machines = try await list
+            // Stable newest-first sort. The server iterates a Dictionary and
+            // returns an unspecified order that would reshuffle cards every poll.
+            // Sort by `createdDate` descending (newest on top) with id ascending as
+            // the tiebreaker for a full, jitter-free order. `createdDate` is set
+            // once at create and never updated, so start/stop never moves a card —
+            // only a newer machine landing above it can. Legacy bundles without a
+            // `createdDate` sort last (`.distantPast`).
+            machines = try await list.sorted { a, b in
+                let ta = a.createdDate ?? .distantPast
+                let tb = b.createdDate ?? .distantPast
+                return ta == tb ? a.id < b.id : ta > tb
+            }
             defaultID = try await def
             pollError = nil
         } catch {
@@ -54,6 +73,7 @@ final class MachinesModel {
             _ = try await client.boot(id: machine.id)
             await refresh()
         } catch {
+            guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to start machine", detail: error.localizedDescription)
         }
     }
@@ -66,6 +86,7 @@ final class MachinesModel {
             try await client.stop(id: machine.id)
             await refresh()
         } catch {
+            guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to stop machine", detail: error.localizedDescription)
         }
     }
@@ -89,6 +110,7 @@ final class MachinesModel {
             try await client.delete(id: machine.id)
             await refresh()
         } catch {
+            guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to delete machine", detail: error.localizedDescription)
         }
     }
@@ -98,6 +120,7 @@ final class MachinesModel {
     /// CLI's `machineConfigFromFlags`, whose ArgumentParser `Flags` types crash
     /// when constructed outside of command-line parsing.
     func cancelCreate() {
+        createGeneration &+= 1
         createTask?.cancel()
         creating = nil
     }
@@ -112,10 +135,12 @@ final class MachinesModel {
         noBoot: Bool
     ) {
         cancelCreate()
+        let generation = createGeneration
         createTask = Task { [weak self] in
             await self?._create(
                 image: image, name: name, cpus: cpus, memory: memory,
-                homeMount: homeMount, setAsDefault: setAsDefault, noBoot: noBoot)
+                homeMount: homeMount, setAsDefault: setAsDefault, noBoot: noBoot,
+                generation: generation)
         }
     }
 
@@ -126,16 +151,39 @@ final class MachinesModel {
         memory: String?,
         homeMount: String?,
         setAsDefault: Bool,
-        noBoot: Bool
+        noBoot: Bool,
+        generation: Int
     ) async {
         let trimmedImage = image.trimmingCharacters(in: .whitespaces)
         guard !trimmedImage.isEmpty else { return }
 
+        // Name is required. The view enforces this (CreateMachineSheet.canCreate),
+        // but the model enforces it too so a non-view caller (a future automation
+        // hook or test) can't silently fall through to `machineID`'s image-derived
+        // id — which would contradict the "name required" decision.
+        guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else {
+            lastError = OperationError(
+                title: "Name required",
+                detail: "A machine name is required.")
+            return
+        }
+
         lastError = nil
         let progress = OperationProgress()
         progress.beginPhase("Fetching image…")
+        // Only the current generation owns `creating`: a superseded task (cancelled
+        // but still running its server-side pull) must not set or clear it. Return
+        // entirely — a superseded task has nothing useful to do.
+        guard createGeneration == generation else { return }
         creating = progress
-        defer { creating = nil }
+        defer { if createGeneration == generation { creating = nil } }
+
+        // Apply events to OUR `progress`, not `self.creating`, so a stale task's
+        // late events land on an orphan nobody observes instead of disturbing the
+        // active bar. (Same actor hop as the old `self.applyProgress`.)
+        let progressHandler: ProgressUpdateHandler = { [weak progress] events in
+            await progress?.apply(events)
+        }
 
         let coordinator = ProgressTaskCoordinator()
         defer { Task { await coordinator.finish() } }
@@ -156,20 +204,38 @@ final class MachinesModel {
                 ].compactMapValues { $0 }
             )
 
-            // Fetch the image (mirror-aware; retagged to canonical reference).
+            // Fetch the image local-first (Docker `run` semantics, matching
+            // container creation): use the cached image when present, fetching
+            // through a mirror only when it is missing. This lets a machine be
+            // created offline when its image is already local — `pull` would
+            // instead force a registry round-trip that fails with no network.
             let fetchTask = await coordinator.startTask()
-            let img = try await MirrorPull.pull(
+            let img = try await MirrorPull.fetch(
                 originalReference: trimmedImage,
                 platform: platform,
                 config: config,
                 progressUpdate: ProgressTaskCoordinator.handler(for: fetchTask, from: progressHandler))
 
+            // The image fetch's underlying XPC `send` carries NO response timeout,
+            // and its reply continuation does not observe cancellation — so a
+            // Cancel pressed mid-pull does NOT abort the underlying pull; it returns
+            // normally once the server-side pull finishes. We must therefore check
+            // cancellation ourselves at every phase boundary, before any
+            // non-idempotent step, so a cancel during pull/unpack stops us *before*
+            // `create` rather than silently falling through to it. `pull`/`unpack`
+            // ran server-side regardless (harmless — both idempotent); we simply
+            // decline to proceed. `checkCancellation` throws `CancellationError`,
+            // handled as a non-error by the outer catch.
+            try Task.checkCancellation()
+
             // Unpack into a create snapshot before use.
             let unpackTask = await coordinator.startTask()
-            creating?.beginPhase("Unpacking image…")
+            progress.beginPhase("Unpacking image…")
             _ = try await img.getCreateSnapshot(
                 platform: platform,
                 progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
+
+            try Task.checkCancellation()
 
             // Determine the machine id (auto-derive from the canonical image when blank).
             let id = try machineID(name: name, image: img.reference)
@@ -182,21 +248,82 @@ final class MachinesModel {
                 platform: platform,
                 userSetup: userSetup)
 
-            // resources is optional; the machine setup artifact is fetched by an
-            // internal CLI helper not available here. container falls back to its
-            // built-in user provisioning when absent.
-            try await client.create(configuration: machineConfig, resources: nil, bootConfig: bootConfig)
+            // --- Create phase: a duplicate name surfaces as an error, not silent reuse. ---
+            //
+            // `create` is a single XPC call that runs to completion under a lock and
+            // does NOT respond to the client's cancellation, so a cancelled create can
+            // still finish server-side — leaving a machine under this id. A repeat with
+            // the same name (deliberate or accidental) would then collide. We surface
+            // that collision as an explicit error rather than silently reusing the
+            // existing machine: the user sees "already exists" and decides whether to
+            // boot it from the list or delete it first. (Silent reuse previously made a
+            // duplicate look like a no-op — the progress bar said "Creating machine…"
+            // while nothing was created, which reads as a failure.)
+            try Task.checkCancellation()
 
-            if setAsDefault {
-                try await client.setDefault(id: id)
+            progress.beginPhase("Creating machine…")
+            // The "already exists" message is shared by the pre-check and the
+            // server-side `.exists` race catch — one local so the two can't drift.
+            let alreadyExistsError = OperationError(
+                title: "Machine already exists",
+                detail: "A machine named \"\(id)\" already exists. Boot it from the list, or delete it first.")
+            let alreadyExists = machines.contains { $0.id == id }
+            if alreadyExists {
+                lastError = alreadyExistsError
+                return
             }
-            if !noBoot {
-                _ = try await client.boot(id: id)
+            do {
+                try await client.create(
+                    configuration: machineConfig, resources: nil, bootConfig: bootConfig)
+            } catch let error as ContainerizationError where error.code == .exists {
+                // Race: created server-side between our check and this call (the cached
+                // list lagged a completion by up to the 2s poll). Treat as a duplicate,
+                // not silent reuse — surface it so the user knows. A superseded task
+                // resumed after its `client.create` XPC ignored cancellation must not
+                // clobber the active task's error — drop it silently.
+                guard createGeneration == generation else { return }
+                lastError = alreadyExistsError
+                return
+            } catch {
+                // A superseded task resumed after its XPC call ignored cancellation:
+                // drop its error so it doesn't clobber the active task's.
+                guard createGeneration == generation else { return }
+                guard !error.isCancellation else { return }
+                lastError = .from("Failed to create machine", error: error)
+                return
+            }
+
+            // Boot tail, only for a genuinely fresh create. `boot` is idempotent.
+            // Boot BEFORE setAsDefault: a cancelled/failed boot must not leave an
+            // unbooted machine as the persisted default, so only mark it default once
+            // it's actually running. `refresh` runs even on boot failure so the
+            // (created-but-stopped) machine shows up in the list regardless.
+            do {
+                if !noBoot {
+                    progress.beginPhase("Starting machine…")
+                    _ = try await client.boot(id: id)
+                }
+                if setAsDefault {
+                    try await client.setDefault(id: id)
+                }
+            } catch {
+                // A superseded task resumed after its XPC call ignored cancellation:
+                // drop its error so it doesn't clobber the active task's.
+                guard createGeneration == generation else { return }
+                guard !error.isCancellation else { return }
+                lastError = .from("Failed to start machine", error: error)
             }
             await refresh()
-        } catch is CancellationError {
-            // User cancelled — not an error. defer sets creating = nil.
         } catch {
+            // A cancellation during fetch/unpack — raw, or wrapped by
+            // `MirrorPull`/`ClientImage` into a `ContainerizationError(cause:
+            // CancellationError)` — is the user aborting, not a failure; `defer`
+            // clears `creating`. See `Error.isCancellation`. Nothing here has
+            // side effects yet (pull/unpack are idempotent), so a retry is clean.
+            // A superseded task resumed after an XPC call ignored cancellation must
+            // not clobber the active task's error — drop it.
+            guard createGeneration == generation else { return }
+            guard !error.isCancellation else { return }
             lastError = .from("Failed to create machine", error: error)
         }
     }
@@ -213,13 +340,4 @@ final class MachinesModel {
         return "\(imageName)-\(suffix)"
     }
 
-    private var progressHandler: ProgressUpdateHandler {
-        { [weak self] events in
-            await self?.applyProgress(events)
-        }
-    }
-
-    private func applyProgress(_ events: [ProgressUpdateEvent]) {
-        creating?.apply(events)
-    }
 }

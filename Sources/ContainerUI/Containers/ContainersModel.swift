@@ -16,6 +16,21 @@ final class ContainersModel {
     private(set) var creating: OperationProgress?
     private(set) var busyItemIDs: Set<String> = []
     private var createTask: Task<Void, Never>?
+    /// Guards `creating` against superseded tasks — a cancelled task's server-side
+    /// pull can't be aborted, so its `defer` must not nil a newer task's bar. See
+    /// MachinesModel.createGeneration for the full rationale.
+    private var createGeneration = 0
+
+    /// First-seen timestamp per container id, for a stable newest-first sort.
+    /// `ContainerSnapshot` has no creation date (only `startedDate`, which jumps
+    /// on each start and would reshuffle cards on start/stop), so the model
+    /// remembers when it first saw each id and sorts by that descending — newly
+    /// created containers land on top the poll after they appear, and start/stop
+    /// never moves them (their `createdAt` is unchanged). Cleared on app restart,
+    /// at which point every surviving container is "seen" afresh and re-sorts by
+    /// id; that one-time reordering is the cost of having no server-side created
+    /// date without forking the dependency.
+    private var createdAt: [String: Date] = [:]
 
     func clearError() { lastError = nil }
 
@@ -30,6 +45,9 @@ final class ContainersModel {
     private(set) var pulling: OperationProgress?
     private var pullTask: Task<Bool, Never>?
     private(set) var pullForCreateTask: Task<Bool, Never>?
+    /// Guards `pulling` against superseded pull tasks (same pattern as
+    /// `createGeneration`).
+    private var pullGeneration = 0
 
     // Build a fresh client (and XPC connection) per use. The Apple clients cache
     // their XPC connection for the object's lifetime; a long-lived cached
@@ -53,10 +71,31 @@ final class ContainersModel {
             // vanishes from the list the moment it stops). Exclude machines, which
             // are containers under the hood but managed in their own tab.
             let filters = ContainerListFilters.all.withoutMachines()
-            // Sort by id so card order is stable across polls (the server's list
-            // order is not guaranteed, which would otherwise reshuffle cards every
-            // refresh). Richer status/started-time ordering is a separate feature.
-            containers = try await client.list(filters: filters).sorted { $0.id < $1.id }
+            let fetched = try await client.list(filters: filters)
+            // Stable newest-first sort. The server iterates a Dictionary and
+            // returns an unspecified order that would reshuffle cards every poll.
+            // Containers have no created date, so we track first-seen time per id:
+            // seed ids we haven't seen, prune ids that are gone, then sort by
+            // first-seen descending (newest on top) with id ascending as the
+            // tiebreaker for a full, jitter-free order. A container's first-seen
+            // time is never updated after it's set, so start/stop/delete-other
+            // never moves it — only a newer container landing above it can.
+            let fetchedIds = Set(fetched.map(\.id))
+            for id in fetchedIds where createdAt[id] == nil {
+                createdAt[id] = Date()
+            }
+            createdAt = createdAt.filter { fetchedIds.contains($0.key) }
+            containers = fetched.sorted { a, b in
+                // `createdAt` was seeded for every id in `fetchedIds` above, so these
+                // lookups are non-nil in practice; the `.distantPast` fallback is pure
+                // defense (treat any unseeded id as oldest, not as a fresh "now") and
+                // should not fire. Contrast MachinesModel, where `?? .distantPast` IS
+                // reachable — `MachineSnapshot.createdDate` is genuinely nil for legacy
+                // bundles.
+                let ta = createdAt[a.id] ?? .distantPast
+                let tb = createdAt[b.id] ?? .distantPast
+                return ta == tb ? a.id < b.id : ta > tb
+            }
             pollError = nil
         } catch {
             pollError = error.localizedDescription
@@ -73,6 +112,7 @@ final class ContainersModel {
             try await process.start()
             await refresh()
         } catch {
+            guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to start container", detail: error.localizedDescription)
         }
     }
@@ -85,6 +125,7 @@ final class ContainersModel {
             try await client.stop(id: container.id)
             await refresh()
         } catch {
+            guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to stop container", detail: error.localizedDescription)
         }
     }
@@ -97,6 +138,7 @@ final class ContainersModel {
             try await client.delete(id: container.id, force: force)
             await refresh()
         } catch {
+            guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to delete container", detail: error.localizedDescription)
         }
     }
@@ -185,20 +227,22 @@ final class ContainersModel {
     /// Pull (and unpack) an image for the create form, reporting progress on
     /// `pulling`. Returns true on success so the caller can then analyze it.
     func cancelPull() {
+        pullGeneration &+= 1
         pullTask?.cancel()
         pulling = nil
     }
 
     func startPullForCreate(reference: String) {
         cancelPull()
+        let generation = pullGeneration
         let task = Task<Bool, Never> { [weak self] in
-            await self?._pullForCreate(reference: reference) ?? false
+            await self?._pullForCreate(reference: reference, generation: generation) ?? false
         }
         pullTask = task
         pullForCreateTask = task
     }
 
-    private func _pullForCreate(reference: String) async -> Bool {
+    private func _pullForCreate(reference: String, generation: Int) async -> Bool {
         let trimmed = reference.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
         lastError = nil
@@ -207,8 +251,15 @@ final class ContainersModel {
         let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
         let progress = OperationProgress()
         progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
+        guard pullGeneration == generation else { return false }
         pulling = progress
-        defer { pulling = nil }
+        defer { if pullGeneration == generation { pulling = nil } }
+
+        // Apply events to OUR `progress`, not `self.pulling`, so a stale task's
+        // late events are harmless. See MachinesModel for the rationale.
+        let pullProgressHandler: ProgressUpdateHandler = { [weak progress] events in
+            await progress?.apply(events)
+        }
 
         let coordinator = ProgressTaskCoordinator()
         defer { Task { await coordinator.finish() } }
@@ -221,30 +272,37 @@ final class ContainersModel {
                 config: config,
                 progressUpdate: ProgressTaskCoordinator.handler(for: fetchTask, from: pullProgressHandler))
 
+            // The pull's underlying XPC `send` does NOT abort on cancel (its reply
+            // continuation ignores cancellation), so a Cancel pressed mid-pull
+            // returns normally once the server-side pull finishes. Check cancellation
+            // at each phase boundary so a cancel stops us *before* the unpack and
+            // the `return true` that would otherwise drive the caller (the create
+            // form) to analyze an image the user just aborted. Throws
+            // `CancellationError`, handled as a non-error below.
+            try Task.checkCancellation()
+
             let unpackTask = await coordinator.startTask()
-            pulling?.beginPhase("Unpacking…")
+            progress.beginPhase("Unpacking…")
             try await image.unpack(
                 platform: platform,
                 progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: pullProgressHandler))
+            try Task.checkCancellation()
             await refreshAvailableImages()
             return true
         } catch is CancellationError {
             // User cancelled — not an error. defer sets pulling = nil.
             return false
         } catch {
+            // A cancellation wrapped by `MirrorPull`/`ClientImage` into a
+            // `ContainerizationError(cause: CancellationError)` is also a user
+            // abort, not a failure. See `Error.isCancellation`. A superseded task
+            // resumed after its XPC call ignored cancellation must not clobber the
+            // active task's error — drop it.
+            guard pullGeneration == generation else { return false }
+            guard !error.isCancellation else { return false }
             lastError = .from("Failed to pull image", error: error)
             return false
         }
-    }
-
-    private var pullProgressHandler: ProgressUpdateHandler {
-        { [weak self] events in
-            await self?.applyPullProgress(events)
-        }
-    }
-
-    private func applyPullProgress(_ events: [ProgressUpdateEvent]) {
-        pulling?.apply(events)
     }
 
     /// Create + start a container. Image fetch and container prepare are run as
@@ -252,34 +310,50 @@ final class ContainersModel {
     /// from the finished fetch phase are dropped instead of disturbing the
     /// prepare bar, and each phase is labeled explicitly.
     func cancelCreate() {
+        createGeneration &+= 1
         createTask?.cancel()
         creating = nil
     }
 
     func startCreate(spec: ContainerCreateSpec) {
         cancelCreate()
+        let generation = createGeneration
         createTask = Task { [weak self] in
-            await self?._create(spec: spec)
+            await self?._create(spec: spec, generation: generation)
         }
     }
 
-    private func _create(spec: ContainerCreateSpec) async {
+    private func _create(spec: ContainerCreateSpec, generation: Int) async {
         lastError = nil
-        creating = OperationProgress()
-        defer { creating = nil }
+        let progress = OperationProgress()
+        guard createGeneration == generation else { return }
+        creating = progress
+        defer { if createGeneration == generation { creating = nil } }
+
+        // Apply events to OUR `progress`, not `self.creating`, so a stale task's
+        // late events are harmless. See MachinesModel for the rationale.
+        let progressHandler: ProgressUpdateHandler = { [weak progress] events in
+            await progress?.apply(events)
+        }
 
         let coordinator = ProgressTaskCoordinator()
         do {
-            let id = try await ContainerCreateEngine.create(spec: spec) { [weak self] label in
-                await self?.beginCreatePhase(label, coordinator: coordinator) ?? { _ in }
+            let id = try await ContainerCreateEngine.create(spec: spec) { [weak self, progress, progressHandler] label in
+                await self?.beginCreatePhase(
+                    label, coordinator: coordinator, progress: progress, progressHandler: progressHandler) ?? { _ in }
             }
             await coordinator.finish()
             await refresh()
             await reportIfStopped(id: id)
-        } catch is CancellationError {
-            await coordinator.finish()
         } catch {
             await coordinator.finish()
+            // A cancellation — raw, or wrapped by `ContainerClient` into a
+            // `ContainerizationError(cause: CancellationError)` — is the user
+            // aborting, not a failure. See `Error.isCancellation`. A superseded task
+            // resumed after its XPC call ignored cancellation must not clobber the
+            // active task's error — drop it.
+            guard createGeneration == generation else { return }
+            guard !error.isCancellation else { return }
             lastError = .from("Failed to create container", error: error)
         }
     }
@@ -287,10 +361,14 @@ final class ContainersModel {
     /// Open a new coordinator task for a create phase, relabel the progress, and
     /// return a handler that only forwards while this phase is current.
     private func beginCreatePhase(
-        _ label: String, coordinator: ProgressTaskCoordinator
+        _ label: String, coordinator: ProgressTaskCoordinator,
+        progress: OperationProgress, progressHandler: @escaping ProgressUpdateHandler
     ) async -> ProgressUpdateHandler {
         let task = await coordinator.startTask()
-        creating?.beginPhase(label)
+        // Relabel OUR `progress`, not `self.creating`: a superseded task's phase
+        // callback fires before its own `checkCancellation`, so it must touch its
+        // own (orphaned) object rather than disturb the active bar's label.
+        progress.beginPhase(label)
         return ProgressTaskCoordinator.handler(for: task, from: progressHandler)
     }
 
@@ -311,13 +389,4 @@ final class ContainersModel {
         }
     }
 
-    private var progressHandler: ProgressUpdateHandler {
-        { [weak self] events in
-            await self?.applyProgress(events)
-        }
-    }
-
-    private func applyProgress(_ events: [ProgressUpdateEvent]) {
-        creating?.apply(events)
-    }
 }

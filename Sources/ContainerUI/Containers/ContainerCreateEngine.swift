@@ -69,6 +69,17 @@ enum ContainerCreateEngine {
             progressUpdate: fetchHandler)
         log.debug("image ready", metadata: ["reference": "\(image.reference)"])
 
+        // The image fetch's underlying XPC `send` carries no response timeout and
+        // its reply continuation does not observe cancellation, so a Cancel pressed
+        // mid-pull does NOT abort `MirrorPull.fetch` — it returns once the
+        // server-side pull finishes. Check cancellation ourselves at each phase
+        // boundary, before any non-idempotent step, so a cancel during the fetches
+        // stops us *before* `client.create` rather than falling through to it.
+        // The pulls ran server-side regardless (harmless — idempotent); we just
+        // decline to proceed. Throws `CancellationError`, treated as a non-error
+        // by the caller's catch (`Error.isCancellation`).
+        try Task.checkCancellation()
+
         // Resolve the init image (vminit) local-first + mirror-aware, exactly as
         // for the user image above. `Utility.containerConfigFromFlags` later
         // calls Apple's non-mirror `ClientImage.fetch` on `config.vminit.image`;
@@ -89,6 +100,8 @@ enum ContainerCreateEngine {
             config: config,
             progressUpdate: initFetchHandler)
         log.debug("init image ready", metadata: ["reference": "\(initImageRef)"])
+
+        try Task.checkCancellation()
 
         let flags = makeFlags(spec: spec)
         log.debug(
@@ -121,6 +134,10 @@ enum ContainerCreateEngine {
             log: log)
 
         let options = ContainerCreateOptions(autoRemove: spec.autoRemove)
+        // Final cancellation gate right before the irreversible create. After this
+        // point `client.create` may run to completion server-side regardless of
+        // cancellation, so this is the last point we can cleanly abort.
+        try Task.checkCancellation()
         log.info("creating container record", metadata: ["id": "\(id)"])
         try await client.create(
             configuration: containerConfig, options: options, kernel: kernel, initImage: initImage)

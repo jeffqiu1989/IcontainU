@@ -207,6 +207,7 @@ private struct CreateMachineSheet: View {
 
     private var canCreate: Bool {
         !resolvedImage.isEmpty
+            && !name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
@@ -287,7 +288,7 @@ private struct CreateMachineSheet: View {
             }
 
             labeledField("Name") {
-                TextField("Optional — auto-generated if blank", text: $name)
+                TextField("Required", text: $name)
                     .textFieldStyle(.roundedBorder)
             }
         }
