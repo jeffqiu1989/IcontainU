@@ -176,7 +176,7 @@ enum ContainerCreateEngine {
             tty: false,
             uid: nil,
             ulimits: [],
-            user: nil)
+            user: spec.user)
 
         let management = ContainerAPIClient.Flags.Management(
             arch: Arch.hostArchitecture().rawValue,
@@ -190,7 +190,7 @@ enum ContainerCreateEngine {
             entrypoint: nil,
             initImage: nil,
             kernel: nil,
-            labels: [],
+            labels: spec.labels.map { "\($0.key)=\($0.value)" },
             mounts: [],
             name: spec.name,
             networks: spec.networks,

@@ -8,6 +8,7 @@ struct ContainerUIApp: App {
     // switches — a tab's view is torn down when you navigate away, but the model
     // must not be, or a running pull/create and its progress would vanish.
     @State private var containersModel = ContainersModel()
+    @State private var composeModel = ComposeModel()
     @State private var imagesModel = ImagesModel()
     @State private var machinesModel = MachinesModel()
     @State private var networksModel = NetworksModel()
@@ -36,6 +37,7 @@ struct ContainerUIApp: App {
             RootView()
                 .environment(systemModel)
                 .environment(containersModel)
+                .environment(composeModel)
                 .environment(imagesModel)
                 .environment(machinesModel)
                 .environment(networksModel)

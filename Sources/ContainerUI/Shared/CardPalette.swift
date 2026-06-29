@@ -10,6 +10,7 @@ enum Palette {
     // MARK: Domains (sidebar + cards share these)
 
     static let containers = Color.teal
+    static let compose = Color.green
     static let machines = Color.brown
     static let images = Color.purple
     static let volumes = Color.orange

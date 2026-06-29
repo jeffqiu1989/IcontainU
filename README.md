@@ -78,6 +78,20 @@ Each container card carries **Start / Stop / Shell / Logs / Delete**, a live **s
 - Tap a port → copy `ip:port` (e.g. `127.0.0.1:8080`)
 - Tap a mount → open the mount directory or volume in Finder
 
+### 🧩 Compose (multi‑service orchestration)
+Import a `compose.yaml`, preview the services and shared networks/volumes, then bring
+the whole project up in dependency order. Projects persist on disk, so a project survives
+`down` and a restart — re‑Up it any time.
+
+A practical subset of compose is supported — `image`, `command`, `ports`, `environment`
+(list **and** map form), `volumes` (named **and** bind), `networks`, `depends_on` (start
+order), `container_name`, `user`, and top‑level `networks:` / `volumes:`. Unsupported fields
+(`build:`, `healthcheck:`, `restart:`, `${VAR}` interpolation, `profiles`, `secrets`, …)
+are surfaced as a warning banner instead of failing silently.
+
+See **Compose — supported subset & limitations** below for the exact field matrix and the
+runtime constraints (especially around DNS and bind mounts).
+
 ### 🚀 Frictionless setup
 First start **auto‑installs the kernel**; the app continuously monitors `container` health; and
 if `container` isn't installed yet, one click takes you to the releases page.
@@ -139,6 +153,43 @@ This is **0.1.0** — early, but already useful day to day.
 - System configuration is **view‑only** in the app; edit it via the CLI.
 - Containers are sorted by id; richer status / start‑time ordering is on the roadmap.
 - Menu bar support is under development.
+
+### Compose — supported subset & limitations
+
+**Supported fields.** `image`, `command` (string **or** array), `ports` (numeric and
+`host:container/proto`), `environment` (list `["K=V"]` **and** map `{K: V}`), `volumes`
+(named `vol:/data` and bind `/host:/data[:ro]`, incl. relative `./`), `networks`,
+`depends_on` (start order; `condition:` ignored), `container_name`, `user`, and top‑level
+`networks:` / `volumes:`.
+
+**Not supported** (reported as a warning banner, never silently dropped):
+`build:`, `healthcheck:`, `depends_on: condition: service_healthy`, `restart:`,
+`deploy.replicas` / scale, `${VAR}` interpolation / `.env` / `env_file`, `profiles`,
+`secrets`, `configs`, `extends`, YAML anchors, and advanced `driver_opts`.
+
+**Runtime constraints** (from Apple `container` 1.0.0 on macOS 26 — not bugs in IcontainU):
+
+- **Container‑to‑container DNS is broken on macOS 26.** The runtime resolves a service name
+  to a reserved `28.0.0.x` address that does **not** match the container's real `eth0` IP
+  (`192.168.64.x`); TCP handshakes pass but stateful protocols (MySQL, PostgreSQL, …) fail
+  mid‑handshake. IcontainU works around this by injecting `<service> → real IP` into each
+  project container's `/etc/hosts` after Up (and re‑injecting when IPs change after a
+  restart). This is why service discovery by name works in IcontainU.
+- **Host bind‑mounted data directories cannot be `chown`ed.** A bind from a macOS host
+  directory refuses `chown` even as root (the file‑sharing layer blocks it), so database
+  images whose entrypoint must `chown` their data dir (mysql/mariadb `…/mysql`,
+  postgres `…/postgresql/data`) **fail to start on a bind mount.** Use a **named volume**
+  for database data dirs (e.g. `db_data:/var/lib/mysql`), which is the compose idiom anyway.
+- **Non‑root images can't write their named‑volume data dir.** Images that run as a
+  non‑root user (e.g. prometheus as `nobody`) crash on a named volume. Set `user: "0"` in
+  the compose file to run as root — this works because named volumes are a Linux filesystem
+  that root can write.
+- **No project‑level service isolation.** Container names are global; two projects with a
+  service of the same name (e.g. both `db`) cannot run at the same time. IcontainU tags
+  every container with a `com.icontainu.compose.project` / `.service` label so a project is
+  listed and torn down as a unit.
+- **Multi‑network is supported** but DNS is **not** isolated per network — a container can
+  resolve peers on any of the project's networks.
 
 ## License & acknowledgements
 

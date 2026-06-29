@@ -28,4 +28,13 @@ struct ContainerCreateSpec {
     var autoRemove: Bool = false
     /// Forward the host SSH agent socket (`--ssh`).
     var ssh: Bool = false
+    /// Labels applied to the container, keyed by name. Used by the Compose feature
+    /// to tag containers with their project/service so a group can be listed and
+    /// torn down together. Empty for a plain single-container create.
+    var labels: [String: String] = [:]
+    /// Run the container as this user — `name|uid[:gid]` form (compose `user:`).
+    /// Nil uses the image's default user. Some images run as a non-root user that
+    /// can't write their named-volume data dir (e.g. prometheus as `nobody`), so a
+    /// compose file sets `user: "0"` to run as root and fix the permission.
+    var user: String?
 }

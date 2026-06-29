@@ -6,6 +6,7 @@ import SwiftUI
 enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     // WORKLOADS
     case containers
+    case compose
     case machines
     // RESOURCES
     case images
@@ -21,6 +22,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .containers: "Containers"
+        case .compose: "Compose"
         case .machines: "Machines"
         case .images: "Images"
         case .volumes: "Volumes"
@@ -33,6 +35,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .containers: "shippingbox"
+        case .compose: "square.stack.3d.up"
         case .machines: "server.rack"
         case .images: "opticaldiscdrive"
         case .volumes: "externaldrive"
@@ -47,6 +50,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     var color: Color {
         switch self {
         case .containers: Palette.containers
+        case .compose: Palette.compose
         case .machines: Palette.machines
         case .images: Palette.images
         case .volumes: Palette.volumes
@@ -70,6 +74,7 @@ struct Sidebar: View {
         List(selection: $selection) {
             Section("Workloads") {
                 row(.containers)
+                row(.compose)
                 row(.machines)
             }
             Section("Resources") {

@@ -15,6 +15,10 @@ let package = Package(
         .package(url: "https://github.com/apple/container.git", exact: "1.0.0"),
         .package(url: "https://github.com/apple/containerization.git", exact: Version(stringLiteral: scVersion)),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
+        // YAML parsing for the Compose feature. Already present transitively via the
+        // `container` package (pinned to 6.2.2 in Package.resolved); declared here as
+        // a direct dependency so `import Yams` resolves.
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.2"),
     ],
     targets: [
         .executableTarget(
@@ -31,6 +35,7 @@ let package = Package(
                 .product(name: "ContainerizationOCI", package: "containerization"),
                 .product(name: "ContainerizationArchive", package: "containerization"),
                 .product(name: "Logging", package: "swift-log"),
+                .product(name: "Yams", package: "yams"),
             ],
             path: "Sources/ContainerUI"
         ),

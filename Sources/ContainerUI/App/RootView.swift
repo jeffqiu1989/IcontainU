@@ -31,6 +31,8 @@ struct RootView: View {
         switch selection {
         case .containers:
             ContainersView()
+        case .compose:
+            ComposeView()
         case .machines:
             MachinesView()
         case .images:
