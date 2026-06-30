@@ -102,9 +102,10 @@ final class CreateContainerFormState {
         // Ports: container port pre-filled, host left for the user.
         let mappedPorts = metadata.exposedPorts.map { spec -> PortRow in
             let parts = spec.split(separator: "/")
+            let port = String(parts.first ?? "")
             return PortRow(
-                hostPort: "",
-                containerPort: String(parts.first ?? ""),
+                hostPort: port,
+                containerPort: port,
                 proto: parts.count > 1 ? String(parts[1]) : "tcp")
         }
         ports = mappedPorts.isEmpty ? [PortRow()] : mappedPorts

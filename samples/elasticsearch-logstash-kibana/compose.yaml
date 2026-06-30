@@ -1,0 +1,63 @@
+services:
+  elasticsearch:
+    image: elasticsearch:8.15.0
+    container_name: es
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - elastic
+  logstash:
+    image: logstash:8.15.0
+    container_name: log
+    environment:
+      LS_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - ./logstash/pipeline/logstash-nginx.config:/usr/share/logstash/pipeline/logstash-nginx.config
+      - ./logstash/nginx.log:/home/nginx.log
+    ports:
+      - "5001:5000/tcp"
+      - "5001:5000/udp"
+      - "5044:5044"
+      - "9600:9600"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail localhost:9600/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elastic
+    command: logstash -f /usr/share/logstash/pipeline/logstash-nginx.config
+  kibana:
+    image: kibana:8.15.0
+    container_name: kib
+    ports:
+      - "5601:5601"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail localhost:5601/api/status || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elastic
+networks:
+  elastic:
+    driver: bridge

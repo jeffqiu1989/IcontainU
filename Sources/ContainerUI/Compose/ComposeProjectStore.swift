@@ -16,6 +16,10 @@ struct ComposeProjectRecord: Codable, Identifiable, Equatable {
     /// Project-prefixed volume names declared by the file.
     var declaredVolumes: [String]
     var importedAt: Date
+    /// Per-service config overrides applied by the user during import.
+    /// Keyed by original service name. Nil for projects imported before this
+    /// feature was added (backward compatible — nil means "use YAML as-is").
+    var serviceOverrides: [String: ServiceOverride]?
 
     var id: String { name }
 

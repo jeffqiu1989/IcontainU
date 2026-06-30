@@ -72,7 +72,7 @@ struct CreateContainerSheet: View {
             height: 640
         ) {
             imageSection
-            basicSection
+            nameSection
             portsSection
             envSection
             mountsSection
@@ -137,6 +137,18 @@ struct CreateContainerSheet: View {
                 if form.analyzing {
                     ProgressView().controlSize(.small)
                 }
+            }
+        }
+    }
+
+    private var nameSection: some View {
+        LabeledSection(label: "Name") {
+            HStack(spacing: 8) {
+                TextField("Optional — auto-generated if blank", text: $form.name)
+                    .textFieldStyle(.roundedBorder)
+                // Invisible placeholder matching loadButton's width so the
+                // Name TextField aligns with Image's TextField.
+                loadButton.hidden()
             }
         }
     }
@@ -217,17 +229,18 @@ struct CreateContainerSheet: View {
         }
     }
 
-    private var basicSection: some View {
-        LabeledSection(label: "Name") {
-            TextField("Optional — auto-generated if blank", text: $form.name)
-                .textFieldStyle(.roundedBorder)
-        }
-    }
-
     private var portsSection: some View {
         LabeledSection(label: "Ports") {
             ForEach($form.ports) { $row in
                 HStack(spacing: 6) {
+                    Picker("", selection: $row.proto) {
+                        Text("TCP").tag("tcp")
+                        Text("UDP").tag("udp")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(.horizontal, -8)
+                    .frame(width: 60)
                     TextField("host", text: $row.hostPort)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 62)
@@ -235,10 +248,6 @@ struct CreateContainerSheet: View {
                     TextField("container", text: $row.containerPort)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 62)
-                    StyledPicker(
-                        selection: $row.proto,
-                        options: [("tcp", "tcp"), ("udp", "udp")],
-                        minWidth: 58)
                     Spacer(minLength: 8)
                     rowControl(isFirst: row.id == form.ports.first?.id) {
                         form.ports.append(PortRow())
@@ -293,10 +302,13 @@ struct CreateContainerSheet: View {
     @ViewBuilder
     private func mountRow(_ row: Binding<MountRow>, isFirst: Bool) -> some View {
         HStack(spacing: 6) {
-            StyledPicker(
-                selection: row.kind,
-                options: MountRow.Kind.allCases.map { ($0, $0.rawValue) },
-                minWidth: 84)
+            Picker("", selection: row.kind) {
+                Image(systemName: "externaldrive").tag(MountRow.Kind.volume)
+                Image(systemName: "folder").tag(MountRow.Kind.bind)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, -8)
+            .frame(width: 80)
 
             switch row.wrappedValue.kind {
             case .volume:

@@ -168,7 +168,20 @@ struct ComposeParserTests {
         }
     }
 
-    @Test func containerNameOverridesServiceName() throws {
+    @Test func serviceNameGetsProjectPrefix() throws {
+        let file = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                """)
+        let result = try file.toSpecs(project: "myproj", baseDirectory: nil)
+        // Container name = <project>-<service> to avoid cross-project collisions.
+        // /etc/hosts injection keys on the service label, not container name.
+        #expect(result.specs["db"]?.name == "myproj-db")
+    }
+
+    @Test func containerNameOverridesProjectPrefix() throws {
         let file = try ComposeParser.parse(
             yaml: """
                 services:
@@ -180,16 +193,45 @@ struct ComposeParserTests {
         #expect(result.specs["svc"]?.name == "prometheus")
     }
 
-    @Test func serviceNameIsContainerNameWithoutPrefix() throws {
+    @Test func twoProjectsWithSameServiceNameGetDifferentContainerNames() throws {
+        let yaml = """
+            services:
+              db:
+                image: postgres
+              web:
+                image: nginx
+                depends_on: [db]
+            """
+        let file = try ComposeParser.parse(yaml: yaml)
+        let result1 = try file.toSpecs(project: "app1", baseDirectory: nil)
+        let result2 = try file.toSpecs(project: "app2", baseDirectory: nil)
+        #expect(result1.specs["db"]?.name == "app1-db")
+        #expect(result2.specs["db"]?.name == "app2-db")
+        #expect(result1.specs["web"]?.name == "app1-web")
+        #expect(result2.specs["web"]?.name == "app2-web")
+    }
+
+    @Test func applyOverridesMergesServiceOverrides() throws {
         let file = try ComposeParser.parse(
             yaml: """
                 services:
                   db:
                     image: postgres
+                    ports:
+                      - "5432:5432"
+                  web:
+                    image: nginx
+                    depends_on: [db]
                 """)
-        let result = try file.toSpecs(project: "myproj", baseDirectory: nil)
-        // Service discovery requires the bare service name, NOT a project prefix.
-        #expect(result.specs["db"]?.name == "db")
+        let overrides: [String: ServiceOverride] = [
+            "db": ServiceOverride(image: "postgres:15", publishPorts: ["5433:5432"]),
+            "web": ServiceOverride(containerName: "custom-web"),
+        ]
+        let overridden = file.applyOverrides(overrides)
+        #expect(overridden.services["db"]?.image == "postgres:15")
+        #expect(overridden.services["db"]?.ports == ["5433:5432"])
+        #expect(overridden.services["web"]?.containerName == "custom-web")
+        #expect(overridden.services["web"]?.image == "nginx")
     }
 
     @Test func namedVolumeGetsProjectPrefix() throws {

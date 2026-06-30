@@ -151,6 +151,13 @@ final class ComposeModel {
         return try file.toSpecs(project: projectName, baseDirectory: baseDirectory)
     }
 
+    /// Parse + lower returning both the file (for override diffing) and the result.
+    func analyzeWithFile(yaml: String, baseDirectory: URL?, projectName: String) throws -> (ComposeFile, ComposeParseResult) {
+        let file = try ComposeParser.parse(yaml: yaml)
+        let result = try file.toSpecs(project: projectName, baseDirectory: baseDirectory)
+        return (file, result)
+    }
+
     /// Whether a project with this name is already stored (warn before overwrite).
     func projectExists(_ name: String) -> Bool { store.exists(name) }
 
@@ -169,22 +176,41 @@ final class ComposeModel {
         cancelUp()
         let generation = upGeneration
         upTask = Task { [weak self] in
-            await self?._up(record: record, generation: generation)
+            await self?._up(record: record, generation: generation, prebuiltParse: nil)
         }
     }
 
-    private func _up(record: ComposeProjectRecord, generation: Int) async {
+    /// Bring the project up using a pre-built parse result (from the import form).
+    /// Skips re-parsing the YAML — the form has already applied user edits.
+    func startUp(record: ComposeProjectRecord, parse: ComposeParseResult) {
+        cancelUp()
+        let generation = upGeneration
+        upTask = Task { [weak self] in
+            await self?._up(record: record, generation: generation, prebuiltParse: parse)
+        }
+    }
+
+    private func _up(record: ComposeProjectRecord, generation: Int, prebuiltParse: ComposeParseResult?) async {
         lastError = nil
 
         // Re-parse to build specs (and re-validate relative binds against the saved
-        // base directory).
+        // base directory). When a pre-built parse is provided (from the import form),
+        // use it directly. Otherwise parse the stored YAML, applying any stored
+        // service overrides before lowering to specs.
         let parse: ComposeParseResult
-        do {
-            let file = try ComposeParser.parse(yaml: record.yaml)
-            parse = try file.toSpecs(project: record.name, baseDirectory: record.baseDirectory)
-        } catch {
-            lastError = .from("Failed to parse compose file", error: error)
-            return
+        if let prebuilt = prebuiltParse {
+            parse = prebuilt
+        } else {
+            do {
+                var file = try ComposeParser.parse(yaml: record.yaml)
+                if let overrides = record.serviceOverrides, !overrides.isEmpty {
+                    file = file.applyOverrides(overrides)
+                }
+                parse = try file.toSpecs(project: record.name, baseDirectory: record.baseDirectory)
+            } catch {
+                lastError = .from("Failed to parse compose file", error: error)
+                return
+            }
         }
 
         // Persist before starting so a project that partially comes up is still

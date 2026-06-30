@@ -1,0 +1,17 @@
+services:
+    hcdb:
+      image: docker.io/library/postgres:alpine
+      environment:
+        POSTGRES_PASSWORD: test
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 3s
+        timeout: 3s
+        retries: 5
+        start_period: 10s
+    hcapp:
+      image: docker.io/library/alpine:latest
+      command: sleep 600
+      depends_on:
+        hcdb:
+          condition: service_healthy

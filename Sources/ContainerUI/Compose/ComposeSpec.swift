@@ -5,12 +5,12 @@ import Yams
 /// `ContainerCreateSpec`s the existing create engine consumes.
 ///
 /// Design notes:
-///   - Service discovery requires the container's resolvable name to equal the
-///     compose service name (the underlying runtime has no network aliases), so a
-///     container is named `container_name ?? <serviceName>` with NO project prefix.
-///     The trade-off — two projects with the same service name can't run at once —
-///     is surfaced in the UI.
-///   - Named volumes and networks DO get a `<project>_` prefix so projects don't
+///   - Container names follow the `<project>-<service>` convention (e.g.
+///     `myapp-db`), preventing cross-project collisions. If the YAML declares
+///     `container_name`, that takes precedence. The service discovery short name
+///     is injected via `/etc/hosts` keyed on the `com.icontainu.compose.service`
+///     label, not the container name, so `db → <real-IP>` works regardless.
+///   - Named volumes and networks get a `<project>_` prefix so projects don't
 ///     clobber each other's shared resources.
 ///   - Several real-world fields are polymorphic in YAML (string|array, list|map,
 ///     int|string); the custom decoders below accept every form the awesome-compose
@@ -405,7 +405,7 @@ extension ComposeFile {
             }
 
             var spec = ContainerCreateSpec(image: svc.image ?? "")
-            spec.name = svc.containerName ?? name
+            spec.name = svc.containerName ?? "\(project)-\(name)"
             spec.command = svc.command
             spec.env = svc.environment
             spec.publishPorts = svc.ports
@@ -460,6 +460,31 @@ extension ComposeFile {
             warnings: warnings.sorted(),
             healthchecks: healthchecks,
             healthyDeps: healthyDeps)
+    }
+
+    /// Apply per-service overrides from the import form, returning a new file
+    /// with overridden fields merged. Only non-nil override fields are applied;
+    /// nil means "keep the YAML default."
+    func applyOverrides(_ overrides: [String: ServiceOverride]) -> ComposeFile {
+        guard !overrides.isEmpty else { return self }
+        var newServices = services
+        for (name, override) in overrides {
+            guard var svc = newServices[name] else { continue }
+            if let image = override.image { svc.image = image }
+            if let containerName = override.containerName { svc.containerName = containerName }
+            if let command = override.command { svc.command = command }
+            if let ports = override.publishPorts { svc.ports = ports }
+            if let env = override.env { svc.environment = env }
+            if let volumes = override.volumes { svc.volumes = volumes }
+            if let networks = override.networks { svc.networks = networks }
+            if let user = override.user { svc.user = user.isEmpty ? nil : user }
+            newServices[name] = svc
+        }
+        return ComposeFile(
+            services: newServices,
+            networks: networks,
+            volumes: volumes
+        )
     }
 
     /// Resolve a `source:target[:mode]` short-syntax volume into the engine's CLI
