@@ -5,7 +5,11 @@ struct ComposeView: View {
     @State private var showingImport = false
     @State private var pendingDown: ComposeProjectView?
     @State private var pendingRemove: ComposeProjectView?
+    @State private var pendingLogs: LogsTarget?
     @State private var copyToast = false
+
+    /// Identifiable wrapper so the logs sheet can bind via `.sheet(item:)`.
+    private struct LogsTarget: Identifiable { let id: String }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +47,9 @@ struct ComposeView: View {
         }
         .sheet(isPresented: $showingImport) {
             ImportComposeSheet(model: model)
+        }
+        .sheet(item: $pendingLogs) { target in
+            composeLogsSheet(containerID: target.id)
         }
         .confirmationDialog(
             "Bring project down?",
@@ -83,6 +90,26 @@ struct ComposeView: View {
         }
     }
 
+    /// A logs sheet wrapping the existing single-container `ContainerLogsTab`, so
+    /// the user can read a service's output without leaving the Compose tab.
+    private func composeLogsSheet(containerID: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label(containerID, systemImage: "text.alignleft")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Done") { pendingLogs = nil }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+            Divider()
+            ContainerLogsTab(containerID: containerID)
+        }
+        .frame(width: 760, height: 520)
+    }
+
     @ViewBuilder
     private var cardGrid: some View {
         if model.projects.isEmpty {
@@ -120,9 +147,11 @@ struct ComposeView: View {
                             project: project,
                             isBusy: model.busyProjects.contains(project.name),
                             isUpping: model.uppingProject == project.name,
+                            hostsDegraded: model.hostsDegraded.contains(project.name),
                             onUp: { up(project) },
                             onDown: { pendingDown = project },
-                            onRemove: { pendingRemove = project })
+                            onRemove: { pendingRemove = project },
+                            onServiceLogs: { pendingLogs = LogsTarget(id: $0) })
                     }
                 }
                 .padding(16)

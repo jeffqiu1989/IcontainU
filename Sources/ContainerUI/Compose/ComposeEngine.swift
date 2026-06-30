@@ -35,8 +35,19 @@ enum ComposeEngine {
             guard let spec = parse.specs[service] else { continue }
             let id = spec.name ?? service
 
-            // Idempotent: reuse an existing container instead of erroring.
+            // Idempotent: reuse an existing container instead of erroring — but
+            // only when it belongs to THIS project. A container with the same name
+            // owned by another project (e.g. two files both pinning
+            // `container_name: db`) must not be silently adopted; fail loudly so the
+            // user resolves the clash instead of one project hijacking the other's
+            // container. A container with no project label is treated as a foreign
+            // owner ("(none)") for the same reason.
             if let existing = try? await client.get(id: id) {
+                let owner = existing.configuration.labels[ComposeFile.projectLabel]
+                guard owner == project else {
+                    throw ComposeError.containerNameConflict(
+                        service: service, name: id, owner: owner ?? "(none)")
+                }
                 if existing.status != .running {
                     log.info("starting existing compose container", metadata: ["id": "\(id)"])
                     _ = await beginPhase("\(service): starting…")
@@ -88,9 +99,9 @@ enum ComposeEngine {
             guard let all = try? await client.list(filters: ContainerListFilters.all.withoutMachines())
             else { break }
             let mappings = HostsInjector.mappings(containers: all)
-            let ready = Set(mappings[project]?.hosts.keys ?? [:].keys)
+            let ready = Set(mappings[project]?.endpoints.keys ?? [:].keys)
             if expected.isSubset(of: ready) || attempt == 9 {
-                await HostsInjector.inject(mappings)
+                _ = await HostsInjector.inject(mappings)
                 break
             }
             try? await Task.sleep(for: .seconds(1))
@@ -98,10 +109,12 @@ enum ComposeEngine {
     }
 
     /// Collect service→IP mappings across all running containers and inject them
-    /// into each project container's `/etc/hosts`.
-    static func injectHosts(containers: [ContainerSnapshot]) async {
+    /// into each project container's `/etc/hosts`. Returns the set of project names
+    /// with at least one container that couldn't be written (degraded discovery).
+    @discardableResult
+    static func injectHosts(containers: [ContainerSnapshot]) async -> Set<String> {
         let mappings = HostsInjector.mappings(containers: containers)
-        await HostsInjector.inject(mappings)
+        return await HostsInjector.inject(mappings)
     }
 
     /// Tear a project down: delete all of its containers (by project label), then

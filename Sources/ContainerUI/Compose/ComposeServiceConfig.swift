@@ -17,8 +17,11 @@ final class ComposeServiceConfig: Identifiable {
     var image: String
     /// Resolved container name. Defaults to `<project>-<service>`; user can override.
     var containerName: String
-    /// True when the user manually edited `containerName`.
-    var containerNameOverridden: Bool = false
+    /// The container name as first loaded; `containerNameOverridden` compares against
+    /// it so the "edited" pencil reflects a real user change, not the default.
+    let originalContainerName: String
+    /// True when the user manually edited `containerName` away from its loaded value.
+    var containerNameOverridden: Bool { containerName != originalContainerName }
 
     var command: String  // space-joined for display; tokenized on makeSpec
     var ports: [PortRow]
@@ -26,6 +29,13 @@ final class ComposeServiceConfig: Identifiable {
     var mounts: [MountRow]
     var networks: [NetworkRow]
     var user: String
+
+    /// Whether the command / user editor rows are shown. The card hides a field
+    /// with no parsed value (to keep cards tight), but the user can reveal an empty
+    /// row via the card's "Add field" menu — these flags drive that. Initialized
+    /// `true` when the field already has a value so existing values always show.
+    var showCommandRow: Bool
+    var showUserRow: Bool
 
     // Read-only display fields (from the decoded YAML, not editable in the form).
     var dependsOn: [String]
@@ -55,12 +65,15 @@ final class ComposeServiceConfig: Identifiable {
         self.serviceName = serviceName
         self.image = image
         self.containerName = containerName
+        self.originalContainerName = containerName
         self.command = command
         self.ports = ports
         self.envs = envs
         self.mounts = mounts
         self.networks = networks
         self.user = user
+        self.showCommandRow = !command.isEmpty
+        self.showUserRow = !user.trimmingCharacters(in: .whitespaces).isEmpty
         self.dependsOn = dependsOn
         self.dependsOnConditions = dependsOnConditions
         self.healthcheck = healthcheck

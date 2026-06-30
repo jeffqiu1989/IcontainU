@@ -27,6 +27,10 @@ enum ComposeError: LocalizedError {
     /// healthy within its healthcheck window. Thrown from the Up loop so the
     /// caller surfaces it and points the user at the dependency's logs.
     case serviceUnhealthy(service: String, dependency: String)
+    /// A service's resolved container name is already in use by a container that
+    /// belongs to a *different* compose project. Thrown from Up rather than
+    /// silently adopting the other project's container.
+    case containerNameConflict(service: String, name: String, owner: String)
 
     var errorDescription: String? {
         switch self {
@@ -45,6 +49,11 @@ enum ComposeError: LocalizedError {
             return
                 "Service \"\(service)\" depends on \"\(dependency)\", which did not become "
                 + "healthy within its health-check window."
+        case .containerNameConflict(let service, let name, let owner):
+            return
+                "Service \"\(service)\" wants the container name \"\(name)\", but it's already "
+                + "used by project \"\(owner)\". Rename the container (container_name) or the "
+                + "project to avoid the clash."
         }
     }
 }
@@ -210,6 +219,12 @@ struct ComposeService: Decodable {
     var healthcheck: ComposeHealthcheck?
     /// Known-but-unsupported fields that were present, for the UI warning banner.
     var ignored: [String]
+    /// Fields present in a form we only partially support (e.g. the long, map-based
+    /// syntax for ports/volumes/environment). Unlike `ignored`, the field name IS
+    /// supported — only this *shape* of it is dropped — so it warrants a distinct
+    /// "entry was dropped" warning rather than "field not supported". A silently
+    /// `?? []`-swallowed long-syntax entry would otherwise vanish without a trace.
+    var unsupportedSyntax: [String]
 
     private enum CodingKeys: String, CodingKey {
         case image
@@ -236,6 +251,10 @@ struct ComposeService: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
+        // Collects field names whose declared value was present but in a shape we
+        // don't decode (the long, map-based syntax), so it isn't dropped silently.
+        var droppedSyntax: [String] = []
+
         image = try c.decodeIfPresent(String.self, forKey: .image)
         containerName = try c.decodeIfPresent(String.self, forKey: .containerName)
 
@@ -255,14 +274,29 @@ struct ComposeService: Decodable {
             environment = map.map { "\($0.key)=\($0.value.value)" }.sorted()
         } else {
             environment = []
+            // Present but neither list nor map (some other shape) — flag it.
+            if c.contains(.environment) { droppedSyntax.append("environment") }
         }
 
         // ports: [int|string] — normalized to "host:container[/proto]" strings.
-        let rawPorts = (try? c.decode([ComposeScalar].self, forKey: .ports))?.map(\.value)
-        ports = (rawPorts ?? []).map(Self.normalizePort)
+        if let rawPorts = try? c.decode([ComposeScalar].self, forKey: .ports) {
+            ports = rawPorts.map(\.value).map(Self.normalizePort)
+        } else {
+            ports = []
+            // The long syntax (`- target: 80\n  published: 8080`) decodes as a
+            // list of maps, not scalars, so it lands here — warn rather than drop.
+            if c.contains(.ports) { droppedSyntax.append("ports (long syntax)") }
+        }
 
         // volumes: ["source:target[:mode]"] (short syntax).
-        volumes = (try? c.decode([ComposeScalar].self, forKey: .volumes))?.map(\.value) ?? []
+        if let rawVolumes = try? c.decode([ComposeScalar].self, forKey: .volumes) {
+            volumes = rawVolumes.map(\.value)
+        } else {
+            volumes = []
+            // The long syntax (`- type: bind\n  source: …\n  target: …`) decodes
+            // as a list of maps, not scalars — warn rather than drop.
+            if c.contains(.volumes) { droppedSyntax.append("volumes (long syntax)") }
+        }
 
         // networks: [name]
         networks = (try? c.decode([ComposeScalar].self, forKey: .networks))?.map(\.value) ?? []
@@ -305,6 +339,7 @@ struct ComposeService: Decodable {
             ignored.append(label)
         }
         self.ignored = ignored
+        self.unsupportedSyntax = droppedSyntax
         // `expose` is intentionally NOT reported: same-network containers already
         // reach every port, so honoring it is a no-op rather than a limitation.
     }
@@ -398,10 +433,27 @@ extension ComposeFile {
         var healthchecks: [String: ComposeHealthcheck] = [:]
         var healthyDeps: [String: [String]] = [:]
 
+        // Networks a service attaches to but that aren't declared at the top level.
+        // docker compose auto-creates these, so we collect and create them too
+        // (otherwise the per-service network wouldn't exist and the create fails).
+        let declaredNetworkKeys = Set((networks ?? [:]).keys)
+        var referencedUndeclared = Set<String>()
+
         for name in ordered {
             let svc = services[name]!
             for field in svc.ignored {
                 warnings.insert("Service \"\(name)\": \(field) is not supported and was ignored.")
+            }
+            for field in svc.unsupportedSyntax {
+                warnings.insert(
+                    "Service \"\(name)\": \(field) is not supported — only the short "
+                    + "syntax is; this entry was dropped.")
+            }
+            for net in svc.networks where !declaredNetworkKeys.contains(net) {
+                referencedUndeclared.insert(net)
+                warnings.insert(
+                    "Service \"\(name)\": network \"\(net)\" isn't declared at the top "
+                    + "level — it will be created automatically.")
             }
 
             var spec = ContainerCreateSpec(image: svc.image ?? "")
@@ -449,7 +501,8 @@ extension ComposeFile {
             }
         }
 
-        let declaredNetworks = (networks?.keys ?? [:].keys).map { "\(project)_\($0)" }.sorted()
+        let declaredNetworks = declaredNetworkKeys.union(referencedUndeclared)
+            .map { "\(project)_\($0)" }.sorted()
         let declaredVolumes = (volumes?.keys ?? [:].keys).map { "\(project)_\($0)" }.sorted()
 
         return ComposeParseResult(

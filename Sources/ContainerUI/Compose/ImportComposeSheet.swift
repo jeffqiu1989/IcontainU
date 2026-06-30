@@ -63,6 +63,7 @@ struct ImportComposeSheet: View {
                 errorBox(analyzeError)
             }
             if !formState.serviceConfigs.isEmpty {
+                warningsBanner
                 servicesEditor
                 sharedResourcesView
             }
@@ -120,6 +121,33 @@ struct ImportComposeSheet: View {
     }
 
     // MARK: - Services editor
+
+    /// Project-wide parse warnings (ignored fields, dropped long-syntax entries,
+    /// service_healthy deps without a healthcheck, auto-created networks). Computed
+    /// during Analyze and shown here so the user sees them before bringing the
+    /// project up.
+    @ViewBuilder
+    private var warningsBanner: some View {
+        if !formState.warnings.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(formState.warnings.count) warning\(formState.warnings.count == 1 ? "" : "s")")
+                        .font(.callout.weight(.semibold))
+                }
+                ForEach(formState.warnings, id: \.self) { warning in
+                    Text("• " + warning)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
 
     private var servicesEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -342,24 +370,24 @@ private struct ServiceEditorCard: View {
                 cardRow("Networks") { networkRows }
             }
 
-            cardRow("Command") {
-                TextField("command", text: $config.command)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+            if config.showCommandRow {
+                cardRow("Command") {
+                    TextField("command", text: $config.command)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
             }
 
-            cardRow("User") {
-                TextField("user (optional)", text: $config.user)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 120, alignment: .leading)
+            if config.showUserRow {
+                cardRow("User") {
+                    TextField("user (optional)", text: $config.user)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 120, alignment: .leading)
+                }
             }
 
             if !config.dependsOn.isEmpty {
-                cardRow("Depends") {
-                    Text(config.dependsOn.joined(separator: ", "))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+                cardRow("Depends") { dependsRow }
             }
 
             if let hc = config.healthcheck {
@@ -371,15 +399,73 @@ private struct ServiceEditorCard: View {
                 }
             }
 
+            addFieldMenu
+
             if !config.ignored.isEmpty {
-                cardRow("Ignored") {
-                    Text(config.ignored.joined(separator: ", "))
+                unsupportedWarning
+            }
+        }
+    }
+
+    /// A menu to reveal the optional command / user editors when they were hidden
+    /// (no value parsed). Only shows entries for fields not already visible.
+    @ViewBuilder
+    private var addFieldMenu: some View {
+        if !config.showCommandRow || !config.showUserRow {
+            Menu {
+                if !config.showCommandRow {
+                    Button("Command") { config.showCommandRow = true }
+                }
+                if !config.showUserRow {
+                    Button("User") { config.showUserRow = true }
+                }
+            } label: {
+                Label("Add field", systemImage: "plus.circle")
+                    .font(.caption)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The depends_on summary: each dependency, with a small "healthy" tag for any
+    /// dependency gated on `condition: service_healthy` (vs plain start order).
+    private var dependsRow: some View {
+        HStack(spacing: 6) {
+            ForEach(config.dependsOn, id: \.self) { dep in
+                HStack(spacing: 3) {
+                    Text(dep)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                    if config.dependsOnConditions[dep] == "service_healthy" {
+                        Text("healthy")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.green)
+                    }
                 }
             }
         }
+    }
+
+    /// A distinct warning row (not a normal field row) for the fields we parsed but
+    /// don't support — they were dropped, so this is informational, not editable.
+    private var unsupportedWarning: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Text("Not supported, ignored: " + config.ignored.joined(separator: ", "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Port rows

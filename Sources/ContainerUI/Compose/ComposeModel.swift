@@ -10,6 +10,9 @@ struct ComposeServiceStatus: Identifiable {
     var service: String
     /// Runtime status, or nil when no container exists yet (project is down).
     var status: RuntimeStatus?
+    /// The backing container's id, when one exists — used to open its logs
+    /// directly from the project card. Nil when the service isn't created.
+    var containerID: String?
     var id: String { service }
 }
 
@@ -50,6 +53,11 @@ final class ComposeModel {
     /// Projects currently mid-down, to disable their controls.
     private(set) var busyProjects: Set<String> = []
 
+    /// Projects with at least one container we couldn't write `/etc/hosts` into
+    /// (e.g. an image without `/bin/sh`), so service discovery may be degraded.
+    /// Surfaced as a small warning badge on the project card.
+    private(set) var hostsDegraded: Set<String> = []
+
     private let store = ComposeProjectStore.shared
 
     func clearError() { lastError = nil }
@@ -71,11 +79,11 @@ final class ComposeModel {
         do {
             let all = try await client.list(filters: ContainerListFilters.all.withoutMachines())
             // Group running containers by their project label.
-            var byProject: [String: [String: RuntimeStatus]] = [:]
+            var byProject: [String: [String: (status: RuntimeStatus, id: String)]] = [:]
             for snapshot in all {
                 guard let project = snapshot.configuration.labels[ComposeFile.projectLabel] else { continue }
                 let service = snapshot.configuration.labels[ComposeFile.serviceLabel] ?? snapshot.id
-                byProject[project, default: [:]][service] = snapshot.status
+                byProject[project, default: [:]][service] = (snapshot.status, snapshot.id)
             }
 
             var views: [ComposeProjectView] = []
@@ -88,7 +96,7 @@ final class ComposeModel {
                 let serviceNames = Self.serviceNames(from: record.yaml)
                 let live = byProject[record.name] ?? [:]
                 let services = serviceNames.map {
-                    ComposeServiceStatus(service: $0, status: live[$0])
+                    ComposeServiceStatus(service: $0, status: live[$0]?.status, containerID: live[$0]?.id)
                 }
                 views.append(ComposeProjectView(name: record.name, services: services, isStored: true))
             }
@@ -96,7 +104,7 @@ final class ComposeModel {
             // Projects seen only in running containers (e.g. started via CLI).
             for (project, live) in byProject where !seen.contains(project) {
                 let services = live.keys.sorted().map {
-                    ComposeServiceStatus(service: $0, status: live[$0])
+                    ComposeServiceStatus(service: $0, status: live[$0]?.status, containerID: live[$0]?.id)
                 }
                 views.append(ComposeProjectView(name: project, services: services, isStored: false))
             }
@@ -125,14 +133,18 @@ final class ComposeModel {
         // A stable signature: project|service=ip sorted, so any IP change flips it.
         var parts: [String] = []
         for (project, mapping) in mappings.sorted(by: { $0.key < $1.key }) {
-            for name in mapping.hosts.keys.sorted() {
-                parts.append("\(project)|\(name)=\(mapping.hosts[name]!)")
+            for name in mapping.endpoints.keys.sorted() {
+                let ep = mapping.endpoints[name]!
+                // Fold every per-network IP in so a change on any network re-injects.
+                let ips = ep.ipsByNetwork.sorted { $0.key < $1.key }
+                    .map { "\($0.key):\($0.value)" }.joined(separator: ",")
+                parts.append("\(project)|\(name)=\(ips)")
             }
         }
         let signature = parts.joined(separator: ";")
         guard signature != lastHostsSignature else { return }
         lastHostsSignature = signature
-        await ComposeEngine.injectHosts(containers: containers)
+        hostsDegraded = await ComposeEngine.injectHosts(containers: containers)
     }
 
     /// Best-effort: extract service names from stored YAML for the down-state list.
@@ -266,6 +278,11 @@ final class ComposeModel {
                         + "become healthy within its health-check window. Open \"\(dep)\" "
                         + "in the Containers tab to view its logs, fix the compose file, "
                         + "then bring the project up again.")
+            } else if let composeErr = error as? ComposeError,
+                      case .containerNameConflict = composeErr {
+                lastError = OperationError(
+                    title: "Failed to bring up \"\(record.name)\"",
+                    detail: composeErr.localizedDescription)
             } else {
                 lastError = .from("Failed to bring up \"\(record.name)\"", error: error)
             }

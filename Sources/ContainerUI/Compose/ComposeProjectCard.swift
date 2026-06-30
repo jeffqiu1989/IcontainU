@@ -8,9 +8,14 @@ struct ComposeProjectCard: View {
     let project: ComposeProjectView
     let isBusy: Bool
     let isUpping: Bool
+    /// True when some container in this project couldn't receive its `/etc/hosts`
+    /// service-discovery block (e.g. an image without `/bin/sh`).
+    let hostsDegraded: Bool
     let onUp: () -> Void
     let onDown: () -> Void
     let onRemove: () -> Void
+    /// Open a service's logs (passes the backing container id).
+    let onServiceLogs: (String) -> Void
 
     @State private var hovering = false
 
@@ -54,6 +59,15 @@ struct ComposeProjectCard: View {
                     .background(palette.tagFill, in: Capsule())
                     .foregroundStyle(palette.tagText)
             }
+            if hostsDegraded {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .help(
+                        "Service discovery may be degraded: a container couldn't be "
+                        + "updated (the image may lack /bin/sh). Services addressed by "
+                        + "name might not resolve.")
+            }
             Spacer(minLength: 0)
             Text("\(project.runningCount)/\(project.totalCount)")
                 .font(.caption.weight(.medium).monospacedDigit())
@@ -74,6 +88,17 @@ struct ComposeProjectCard: View {
                 .truncationMode(.middle)
             Spacer(minLength: 8)
             if let status = service.status {
+                if let id = service.containerID {
+                    Button {
+                        onServiceLogs(id)
+                    } label: {
+                        Image(systemName: "text.alignleft")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("View \(service.service) logs")
+                }
                 StatusBadge(status: status)
             } else {
                 Text("not created")

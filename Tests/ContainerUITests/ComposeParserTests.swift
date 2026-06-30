@@ -106,6 +106,86 @@ struct ComposeParserTests {
         #expect(result.warnings.contains { $0.contains("restart") })
     }
 
+    // MARK: Long-syntax (unsupported) is warned, not silently dropped
+
+    @Test func longSyntaxPortsWarnedAndDropped() throws {
+        let file = try ComposeParser.parse(
+            yaml: """
+                services:
+                  a:
+                    image: alpine
+                    ports:
+                      - target: 80
+                        published: 8080
+                        protocol: tcp
+                """)
+        #expect(file.services["a"]?.ports.isEmpty == true)
+        let result = try file.toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.warnings.contains { $0.contains("ports") })
+    }
+
+    @Test func longSyntaxVolumesWarnedAndDropped() throws {
+        let file = try ComposeParser.parse(
+            yaml: """
+                services:
+                  a:
+                    image: alpine
+                    volumes:
+                      - type: bind
+                        source: ./data
+                        target: /data
+                """)
+        #expect(file.services["a"]?.volumes.isEmpty == true)
+        let result = try file.toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.warnings.contains { $0.contains("volumes") })
+    }
+
+    @Test func shortSyntaxPortsNotWarned() throws {
+        // A normal short-syntax ports list must NOT trip the long-syntax warning.
+        let file = try ComposeParser.parse(
+            yaml: """
+                services:
+                  a:
+                    image: alpine
+                    ports:
+                      - 8080:80
+                """)
+        let result = try file.toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.warnings.contains { $0.contains("ports") } == false)
+    }
+
+    // MARK: Undeclared networks are auto-created + warned
+
+    @Test func undeclaredNetworkIsAutoCreatedAndWarned() throws {
+        let file = try ComposeParser.parse(
+            yaml: """
+                services:
+                  a:
+                    image: alpine
+                    networks: [backend]
+                """)
+        let result = try file.toSpecs(project: "p", baseDirectory: nil)
+        // The referenced-but-undeclared network is created so the service can attach.
+        #expect(result.declaredNetworks == ["p_backend"])
+        #expect(result.specs["a"]?.networks == ["p_backend"])
+        #expect(result.warnings.contains { $0.contains("backend") })
+    }
+
+    @Test func declaredNetworkNotWarned() throws {
+        let file = try ComposeParser.parse(
+            yaml: """
+                services:
+                  a:
+                    image: alpine
+                    networks: [backend]
+                networks:
+                  backend:
+                """)
+        let result = try file.toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.declaredNetworks == ["p_backend"])
+        #expect(result.warnings.contains { $0.contains("isn't declared") } == false)
+    }
+
     @Test func userFieldParsedAndPassed() throws {
         let file = try ComposeParser.parse(
             yaml: """
