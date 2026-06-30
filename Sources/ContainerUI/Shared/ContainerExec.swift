@@ -53,6 +53,72 @@ enum ContainerExec {
         }
     }
 
+    /// Run a health-check probe via `container exec` and report whether it
+    /// succeeded. Unlike `run`, this:
+    ///   - returns `Bool` instead of throwing on non-zero exit (a non-zero exit
+    ///     is the normal "unhealthy" signal, not an error);
+    ///   - enforces a `timeout` by racing the process against a sleep and
+    ///     killing it on overrun, so a hung probe never stalls the Up loop;
+    ///   - cooperates with cancellation — a cancelled probe kills the process.
+    ///
+    /// A missing binary is the only hard failure (thrown); a process that fails
+    /// to launch is reported as unhealthy (`false`) rather than thrown, so one
+    /// bad probe degrades the service to "unhealthy" instead of aborting the
+    /// project. `Process` is `Sendable` on this SDK, so capturing it in the task
+    /// group's child tasks (and the cancellation handler) is sound.
+    static func runProbe(
+        id: String, command: String, args: [String],
+        user: String? = nil, timeout: TimeInterval
+    ) async throws -> Bool {
+        guard let bin = binaryPath else { throw Error.containerNotFound }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: bin)
+        var argv = ["exec"]
+        if let user { argv += ["-u", user] }
+        argv += [id, command] + args
+        process.arguments = argv
+        // The probe is judged solely by exit code; discard its output.
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        guard (try? process.run()) != nil else { return false }
+
+        return await withTaskCancellationHandler {
+            await withTaskGroup(of: ProbeOutcome.self) { group in
+                group.addTask {
+                    process.waitUntilExit()
+                    return .exited(status: process.terminationStatus)
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(timeout))
+                    return .timedOut
+                }
+                let first = await group.next() ?? .timedOut
+                group.cancelAll()
+                // If the timeout (or cancel) won and the process is still
+                // alive, kill it — `waitUntilExit()` is a blocking C call that
+                // cancellation alone can't interrupt, so terminate() is what
+                // lets the exit task complete and the group close.
+                if process.isRunning { process.terminate() }
+                // Drain the remaining task so the group returns cleanly.
+                while await group.next() != nil {}
+                switch first {
+                case .exited(let status): return status == 0
+                case .timedOut: return false
+                }
+            }
+        } onCancel: {
+            // Cooperate with parent cancellation: kill the probe so its exit
+            // task resumes promptly instead of blocking on `waitUntilExit()`.
+            process.terminate()
+        }
+    }
+
+    private enum ProbeOutcome {
+        case exited(status: Int32)
+        case timedOut
+    }
+
     private static func lookupOnPath(_ name: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")

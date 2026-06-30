@@ -118,7 +118,9 @@ struct ImportComposeSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(result.orderedServices, id: \.self) { service in
                     if let spec = result.specs[service] {
-                        servicePreview(service: service, spec: spec)
+                        servicePreview(
+                            service: service, spec: spec,
+                            healthcheck: result.healthchecks[service])
                     }
                 }
                 if !result.declaredNetworks.isEmpty || !result.declaredVolumes.isEmpty {
@@ -128,7 +130,9 @@ struct ImportComposeSheet: View {
         }
     }
 
-    private func servicePreview(service: String, spec: ContainerCreateSpec) -> some View {
+    private func servicePreview(
+        service: String, spec: ContainerCreateSpec, healthcheck: ComposeHealthcheck?
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: "shippingbox").font(.caption).foregroundStyle(Palette.compose)
@@ -140,11 +144,28 @@ struct ImportComposeSheet: View {
             metaLine("Env", spec.env.map { String($0.split(separator: "=").first ?? "") })
             metaLine("Volumes", spec.volumes)
             metaLine("Networks", spec.networks)
+            if let healthcheck {
+                metaLine("Health", [healthSummary(healthcheck)])
+            }
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
         .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.cardBorder, lineWidth: 1) }
+    }
+
+    /// One-line summary of a healthcheck for the preview: the probe command and
+    /// its cadence. CMD argv is joined; CMD-SHELL shows the script verbatim.
+    private func healthSummary(_ hc: ComposeHealthcheck) -> String {
+        let probe: String
+        switch hc.probe {
+        case .cmd(let argv): probe = argv.joined(separator: " ")
+        case .cmdShell(let script): probe = script
+        case .none: return "disabled"
+        }
+        let interval = hc.interval == hc.interval.rounded()
+            ? "\(Int(hc.interval))s" : "\(hc.interval)s"
+        return "\(probe)  ·  every \(interval), \(hc.retries)×"
     }
 
     @ViewBuilder

@@ -46,6 +46,28 @@ enum ComposeEngine {
                 continue
             }
 
+            // Honor `depends_on: {condition: service_healthy}`: before creating
+            // this service, wait for each healthy-gated dependency to pass its
+            // healthcheck. A dependency was created+started in an earlier
+            // iteration (topological order), so its container exists here.
+            // `ComposeProbe` throws `.serviceUnhealthy` if one never becomes
+            // healthy — the whole Up fails, but the dependency container is left
+            // running so its logs can be inspected (see ComposeModel._up).
+            // Gating only applies to about-to-create services: an already-running
+            // dependent (idempotent reuse above) is left as-is.
+            if let deps = parse.healthyDeps[service] {
+                for dep in deps {
+                    guard let hc = parse.healthchecks[dep] else { continue }
+                    let depID = parse.specs[dep]?.name ?? dep
+                    log.info("gating on healthy dependency", metadata: [
+                        "service": "\(service)", "dependency": "\(dep)", "id": "\(depID)"])
+                    let probe = ComposeProbe(spec: hc)
+                    try await probe.waitUntilHealthy(
+                        containerID: depID, service: service, dependency: dep,
+                        beginPhase: beginPhase)
+                }
+            }
+
             try Task.checkCancellation()
             log.info("creating compose service", metadata: ["project": "\(project)", "service": "\(service)"])
             _ = try await ContainerCreateEngine.create(spec: spec) { label in

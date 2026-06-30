@@ -130,6 +130,103 @@ struct ComposeEngineE2ETests {
         try? await ComposeEngine.down(project: project, record: record, removeVolumes: true, removeNetworks: true)
     }
 
+    /// `service_healthy` gating: an hcapp that depends on a healthy hcdb must not
+    /// be created until the hcdb's probe passes. Uses alpine (light) with `true` as
+    /// the probe so the gate resolves immediately — exercises the gating path
+    /// without a slow-to-start image.
+    @Test(.enabled(if: enabled, "set ICONTAINU_E2E=1 to run"))
+    func healthyGatingLetsAppStart() async throws {
+        let project = "e2e-hcgate"
+        let yaml = """
+            services:
+              hcdb:
+                image: docker.io/library/alpine:latest
+                command: sleep 600
+                healthcheck:
+                  test: ["CMD", "true"]
+                  interval: 1s
+                  timeout: 2s
+                  retries: 3
+              hcapp:
+                image: docker.io/library/alpine:latest
+                command: sleep 600
+                depends_on:
+                  hcdb:
+                    condition: service_healthy
+            """
+        let parse = try ComposeParser.parse(yaml: yaml).toSpecs(project: project, baseDirectory: nil)
+        let record = ComposeProjectRecord(
+            name: project, yaml: yaml, baseDirectoryPath: nil,
+            declaredNetworks: parse.declaredNetworks, declaredVolumes: parse.declaredVolumes,
+            importedAt: Date())
+        // Sanity: the hcapp is registered as gated on hcdb.
+        #expect(parse.healthyDeps["hcapp"] == ["hcdb"])
+        do {
+            try await ComposeEngine.up(project: project, parse: parse, beginPhase: Self.noopPhase)
+            // Both containers should be up — the hcapp only exists if the gate passed.
+            let client = ContainerClient()
+            let mine = try await client.list(filters: ContainerListFilters.all.withoutMachines())
+                .filter { $0.configuration.labels[ComposeFile.projectLabel] == project }
+            #expect(Set(mine.map(\.id)) == ["hcdb", "hcapp"])
+        } catch {
+            try? await ComposeEngine.down(project: project, record: record, removeVolumes: true, removeNetworks: true)
+            throw error
+        }
+        try? await ComposeEngine.down(project: project, record: record, removeVolumes: true, removeNetworks: true)
+    }
+
+    /// The failure path: a hcdb whose probe is `["CMD","false"]` never becomes
+    /// healthy, so an hcapp gated on it must cause Up to throw `serviceUnhealthy`,
+    /// and — per compose semantics — the hcdb container is left running so its
+    /// logs can be inspected.
+    @Test(.enabled(if: enabled, "set ICONTAINU_E2E=1 to run"))
+    func unhealthyGateFailsUp() async throws {
+        let project = "e2e-hcfail"
+        let yaml = """
+            services:
+              hcdb:
+                image: docker.io/library/alpine:latest
+                command: sleep 600
+                healthcheck:
+                  test: ["CMD", "false"]
+                  interval: 1s
+                  timeout: 2s
+                  retries: 2
+              hcapp:
+                image: docker.io/library/alpine:latest
+                command: sleep 600
+                depends_on:
+                  hcdb:
+                    condition: service_healthy
+            """
+        let parse = try ComposeParser.parse(yaml: yaml).toSpecs(project: project, baseDirectory: nil)
+        let record = ComposeProjectRecord(
+            name: project, yaml: yaml, baseDirectoryPath: nil,
+            declaredNetworks: parse.declaredNetworks, declaredVolumes: parse.declaredVolumes,
+            importedAt: Date())
+
+        var threw = false
+        do {
+            try await ComposeEngine.up(project: project, parse: parse, beginPhase: Self.noopPhase)
+        } catch ComposeError.serviceUnhealthy(let svc, let dep) {
+            threw = true
+            #expect(svc == "hcapp")
+            #expect(dep == "hcdb")
+        }
+        #expect(threw, "Up should throw serviceUnhealthy when a gated dep never becomes healthy")
+
+        // The hcdb container must remain running (logs inspectable), and the hcapp
+        // must NOT have been created.
+        let client = ContainerClient()
+        let mine = try await client.list(filters: ContainerListFilters.all.withoutMachines())
+            .filter { $0.configuration.labels[ComposeFile.projectLabel] == project }
+        let ids = Set(mine.map(\.id))
+        #expect(ids.contains("hcdb"), "hcdb should remain after a gate failure")
+        #expect(!ids.contains("hcapp"), "hcapp must not be created when its gate fails")
+
+        try? await ComposeEngine.down(project: project, record: record, removeVolumes: true, removeNetworks: true)
+    }
+
     // MARK: - Harness
 
     /// Up the named example from `~/awesome-compose`, run `body`, then always tear

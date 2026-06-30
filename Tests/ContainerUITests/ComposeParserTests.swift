@@ -303,4 +303,167 @@ struct ComposeParserTests {
             #expect(result.specs[svc]?.image.isEmpty == false)
         }
     }
+
+    // MARK: healthcheck parsing
+
+    @Test func healthcheckCmdArray() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                    healthcheck:
+                      test: ["CMD", "pg_isready"]
+                      interval: 10s
+                      timeout: 5s
+                      retries: 5
+                """).toSpecs(project: "p", baseDirectory: nil)
+        let hc = try #require(result.healthchecks["db"])
+        // The CMD prefix is a docker marker, not part of the argv to run —
+        // `["CMD","pg_isready"]` executes `pg_isready`, not `CMD pg_isready`.
+        #expect(hc.probe == .cmd(["pg_isready"]))
+        #expect(hc.interval == 10)
+        #expect(hc.timeout == 5)
+        #expect(hc.retries == 5)
+        #expect(hc.startPeriod == 0)
+    }
+
+    @Test func healthcheckCmdShellArray() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: mysql
+                    healthcheck:
+                      test: ["CMD-SHELL", "mysqladmin ping --silent || exit 1"]
+                      interval: 3s
+                      retries: 5
+                      start_period: 30s
+                """).toSpecs(project: "p", baseDirectory: nil)
+        let hc = try #require(result.healthchecks["db"])
+        #expect(hc.probe == .cmdShell("mysqladmin ping --silent || exit 1"))
+        #expect(hc.interval == 3)
+        #expect(hc.retries == 5)
+        #expect(hc.startPeriod == 30)
+    }
+
+    @Test func healthcheckStringFormIsCmdShell() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: redis
+                    healthcheck:
+                      test: redis-cli ping
+                """).toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.healthchecks["db"]?.probe == .cmdShell("redis-cli ping"))
+    }
+
+    @Test func healthcheckNoneIsNotRegistered() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                    healthcheck:
+                      test: ["NONE"]
+                """).toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.healthchecks["db"] == nil)
+    }
+
+    @Test func healthcheckDefaultsApplied() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                    healthcheck:
+                      test: ["CMD", "pg_isready"]
+                """).toSpecs(project: "p", baseDirectory: nil)
+        let hc = try #require(result.healthchecks["db"])
+        #expect(hc.interval == 30)   // docker default
+        #expect(hc.timeout == 30)
+        #expect(hc.retries == 3)
+        #expect(hc.startPeriod == 0)
+    }
+
+    @Test func healthcheckNotReportedAsIgnored() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                    healthcheck:
+                      test: ["CMD", "pg_isready"]
+                """).toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.warnings.contains { $0.contains("healthcheck") } == false)
+    }
+
+    @Test func serviceHealthyDependencyGates() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                    healthcheck:
+                      test: ["CMD", "pg_isready"]
+                  app:
+                    image: nginx
+                    depends_on:
+                      db:
+                        condition: service_healthy
+                """).toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.healthyDeps["app"] == ["db"])
+        #expect(result.orderedServices == ["db", "app"])
+    }
+
+    @Test func serviceStartedDependencyDoesNotGate() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                    healthcheck:
+                      test: ["CMD", "pg_isready"]
+                  app:
+                    image: nginx
+                    depends_on:
+                      db:
+                        condition: service_started
+                """).toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.healthyDeps["app"] == nil)
+    }
+
+    @Test func healthyDepWithoutHealthcheckWarns() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                  app:
+                    image: nginx
+                    depends_on:
+                      db:
+                        condition: service_healthy
+                """).toSpecs(project: "p", baseDirectory: nil)
+        // No healthcheck on db → not gated…
+        #expect(result.healthyDeps["app"] == nil)
+        // …but warned, so the user knows the gate won't fire.
+        #expect(result.warnings.contains { $0.contains("service_healthy") } == true)
+    }
+
+    @Test func dependsOnListFormHasNoConditions() throws {
+        let result = try ComposeParser.parse(
+            yaml: """
+                services:
+                  db:
+                    image: postgres
+                  app:
+                    image: nginx
+                    depends_on:
+                      - db
+                """).toSpecs(project: "p", baseDirectory: nil)
+        #expect(result.orderedServices == ["db", "app"])
+        #expect(result.healthyDeps["app"] == nil)
+    }
 }

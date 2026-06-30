@@ -228,7 +228,21 @@ final class ComposeModel {
             await coordinator.finish()
             guard upGeneration == generation else { return }
             guard !error.isCancellation else { return }
-            lastError = .from("Failed to bring up \"\(record.name)\"", error: error)
+            // A health-check gate failure is surfaced with a pointer to the
+            // dependency's logs: the dependency container is left running (Up
+            // fails without cleaning up), so its logs explain why it never came
+            // healthy. Fixing the compose file and re-Upping retries the gate.
+            if let composeErr = error as? ComposeError,
+               case .serviceUnhealthy(let svc, let dep) = composeErr {
+                lastError = OperationError(
+                    title: "Failed to bring up \"\(record.name)\"",
+                    detail: "Service \"\(svc)\" depends on \"\(dep)\", which did not "
+                        + "become healthy within its health-check window. Open \"\(dep)\" "
+                        + "in the Containers tab to view its logs, fix the compose file, "
+                        + "then bring the project up again.")
+            } else {
+                lastError = .from("Failed to bring up \"\(record.name)\"", error: error)
+            }
             await refresh()
         }
     }

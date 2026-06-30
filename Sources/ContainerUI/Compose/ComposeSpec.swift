@@ -23,6 +23,10 @@ enum ComposeError: LocalizedError {
     case noServices
     case dependencyCycle([String])
     case relativeBindWithoutBaseDirectory(service: String, source: String)
+    /// A dependency declared with `condition: service_healthy` did not become
+    /// healthy within its healthcheck window. Thrown from the Up loop so the
+    /// caller surfaces it and points the user at the dependency's logs.
+    case serviceUnhealthy(service: String, dependency: String)
 
     var errorDescription: String? {
         switch self {
@@ -37,6 +41,10 @@ enum ComposeError: LocalizedError {
                 "Service \"\(service)\" uses a relative bind mount \"\(source)\" that must be "
                 + "resolved against the compose file's directory. Import the project by choosing "
                 + "the file (not by pasting YAML) so the path can be resolved."
+        case .serviceUnhealthy(let service, let dependency):
+            return
+                "Service \"\(service)\" depends on \"\(dependency)\", which did not become "
+                + "healthy within its health-check window."
         }
     }
 }
@@ -68,6 +76,103 @@ struct ComposeScalar: Decodable {
     }
 }
 
+// MARK: - Healthcheck
+
+/// A compose `healthcheck:` block, lowered into a probe the engine runs via
+/// `container exec` during Up. Only the fields the awesome-compose examples use
+/// are honored: `test`, `interval`, `timeout`, `retries`, `start_period`.
+/// `start_interval` and `disable` are parsed (so they don't trip the unknown-
+/// field path) but otherwise ignored — neither appears in real samples.
+struct ComposeHealthcheck: Decodable {
+    /// What to run. `["CMD", ...]` execs the argv directly; `["CMD-SHELL", "<s>"]`
+    /// (or a bare `test:` string) runs `<s>` through `/bin/sh -c`; `["NONE"]` or
+    /// `disable: true` disables the check (the service starts with no gating).
+    var probe: ProbeSpec
+    var interval: TimeInterval
+    var timeout: TimeInterval
+    var retries: Int
+    /// Grace period during which probe failures don't count toward `retries`.
+    var startPeriod: TimeInterval
+
+    enum ProbeSpec: Equatable {
+        case cmd([String])
+        case cmdShell(String)
+        case none
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case test, interval, timeout, retries
+        case startPeriod = "start_period"
+        case startInterval = "start_interval"
+        case disable
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let disabled = (try? c.decode(Bool.self, forKey: .disable)) ?? false
+
+        if let s = try? c.decode(String.self, forKey: .test) {
+            // Bare string form — docker treats it as CMD-SHELL.
+            probe = disabled ? .none : .cmdShell(s)
+        } else if let arr = try? c.decode([String].self, forKey: .test) {
+            probe = disabled ? .none : Self.parseArray(arr)
+        } else {
+            // A healthcheck block without a `test` is a no-op for us (we don't
+            // inherit image HEALTHCHECK), so treat it as disabled.
+            probe = .none
+        }
+
+        interval = Self.parseDuration(try? c.decode(String.self, forKey: .interval), default: 30)
+        timeout = Self.parseDuration(try? c.decode(String.self, forKey: .timeout), default: 30)
+        retries = (try? c.decode(Int.self, forKey: .retries)) ?? 3
+        startPeriod = Self.parseDuration(try? c.decode(String.self, forKey: .startPeriod), default: 0)
+    }
+
+    /// Interpret a `test:` array by its leading element, matching docker:
+    /// `CMD` execs the rest as argv; `CMD-SHELL` joins the rest into one shell
+    /// script; `NONE` disables; an array with no recognized prefix is treated
+    /// as `CMD`.
+    private static func parseArray(_ arr: [String]) -> ProbeSpec {
+        guard let head = arr.first else { return .none }
+        let rest = Array(arr.dropFirst())
+        switch head {
+        case "NONE":
+            return .none
+        case "CMD":
+            return rest.isEmpty ? .none : .cmd(rest)
+        case "CMD-SHELL":
+            // The script is a single string; join defensively in case it was
+            // split across array elements.
+            return .cmdShell(rest.joined(separator: " "))
+        default:
+            return .cmd(arr)
+        }
+    }
+
+    /// Parse a compose duration string ("30s", "3m", "2h") into seconds. The
+    /// awesome-compose examples use only `s`; `m`/`h` are accepted for
+    /// completeness. Whole or fractional numbers are supported; an unknown or
+    /// missing value falls back to `defaultValue`.
+    private static func parseDuration(_ raw: String?, default defaultValue: TimeInterval) -> TimeInterval {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            return defaultValue
+        }
+        var unit: Character = "s"
+        var numberString = raw
+        if let last = raw.last, !last.isNumber && last != "." {
+            unit = last
+            numberString = String(raw.dropLast())
+        }
+        guard let value = Double(numberString) else { return defaultValue }
+        switch unit {
+        case "s": return value
+        case "m": return value * 60
+        case "h": return value * 3600
+        default: return defaultValue
+        }
+    }
+}
+
 // MARK: - Top level
 
 struct ComposeFile: Decodable {
@@ -93,9 +198,16 @@ struct ComposeService: Decodable {
     var volumes: [String]
     var networks: [String]
     var dependsOn: [String]
+    /// Per-dependency `condition` values from the map form of `depends_on`
+    /// (`{db: {condition: service_healthy}}`). Empty for the list form. Keys
+    /// without a condition default to `service_started` (no gating).
+    var dependsOnConditions: [String: String]
     /// Run the container as this user — compose `user:` (a string like "0",
     /// "1000:1000", or "mysql"). YAML numbers are accepted.
     var user: String?
+    /// A `healthcheck:` block, if declared. `nil` when absent; a probe of
+    /// `.none` when present but disabled (`["NONE"]` / `disable: true`).
+    var healthcheck: ComposeHealthcheck?
     /// Known-but-unsupported fields that were present, for the UI warning banner.
     var ignored: [String]
 
@@ -110,9 +222,9 @@ struct ComposeService: Decodable {
         case dependsOn = "depends_on"
         case expose
         case user
+        case healthcheck
         // Known but unsupported — presence is reported, value ignored.
         case build
-        case healthcheck
         case restart
         case deploy
         case profiles
@@ -155,23 +267,34 @@ struct ComposeService: Decodable {
         // networks: [name]
         networks = (try? c.decode([ComposeScalar].self, forKey: .networks))?.map(\.value) ?? []
 
-        // depends_on: [name] | {name: {condition: …}} — only the names matter here.
+        // depends_on: [name] | {name: {condition: …}}. The list form gives plain
+        // names (started semantics, no gating); the map form also yields a
+        // `condition` per dependency — `service_healthy` makes the Up loop wait
+        // for the dependency's healthcheck before starting this service.
         if let list = try? c.decode([String].self, forKey: .dependsOn) {
             dependsOn = list
+            dependsOnConditions = [:]
         } else if let map = try? c.decode([String: DependsCondition].self, forKey: .dependsOn) {
             dependsOn = Array(map.keys)
+            // Keep only the non-empty conditions (a `null` value or missing
+            // `condition` means the default `service_started`).
+            dependsOnConditions = map.compactMapValues { $0.condition }
+                .filter { !$0.value.isEmpty }
         } else {
             dependsOn = []
+            dependsOnConditions = [:]
         }
 
         // user: scalar (string or int, e.g. "0" / "1000:1000" / "mysql").
         user = (try? c.decode(ComposeScalar.self, forKey: .user))?.value
 
+        // healthcheck: optional block; decoded into a probe spec.
+        healthcheck = try? c.decodeIfPresent(ComposeHealthcheck.self, forKey: .healthcheck)
+
         // Collect known-unsupported fields that are actually present.
         var ignored: [String] = []
         for (key, label) in [
             (CodingKeys.build, "build"),
-            (.healthcheck, "healthcheck"),
             (.restart, "restart"),
             (.deploy, "deploy"),
             (.profiles, "profiles"),
@@ -212,9 +335,19 @@ struct ComposeService: Decodable {
 }
 
 /// The value side of a `depends_on:` map entry (`{condition: service_started}`).
-/// We don't act on the condition (no health checks underneath), but decode it so
-/// the map form parses.
-private struct DependsCondition: Decodable {}
+/// We honor `service_healthy` (gating the dependent's start on the dependency's
+/// healthcheck) and otherwise treat the dependency as started-only. `null`
+/// values (`db:` with no body) decode to a nil condition (started).
+private struct DependsCondition: Decodable {
+    var condition: String?
+
+    private enum CodingKeys: String, CodingKey { case condition }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        condition = try c.decodeIfPresent(String.self, forKey: .condition)
+    }
+}
 
 // MARK: - Lowering to ContainerCreateSpec
 
@@ -230,6 +363,17 @@ struct ComposeParseResult {
     var declaredVolumes: [String]
     /// Human-readable "ignored field" warnings, deduplicated.
     var warnings: [String]
+    /// Healthcheck specs, keyed by service name, for services that declare a
+    /// non-disabled probe. The Up loop runs these to gate `service_healthy`
+    /// dependents. Topological order means a dependency is always present here
+    /// before any service that depends on it is processed.
+    var healthchecks: [String: ComposeHealthcheck]
+    /// For each service, the dependencies it declared with
+    /// `condition: service_healthy` AND that themselves declare a healthcheck —
+    /// the Up loop waits for each to become healthy before starting the service.
+    /// A `service_healthy` dependency without a healthcheck is reported as a
+    /// warning (and treated as started-only) rather than blocking forever.
+    var healthyDeps: [String: [String]]
 }
 
 extension ComposeFile {
@@ -251,6 +395,8 @@ extension ComposeFile {
 
         var specs: [String: ContainerCreateSpec] = [:]
         var warnings = Set<String>()
+        var healthchecks: [String: ComposeHealthcheck] = [:]
+        var healthyDeps: [String: [String]] = [:]
 
         for name in ordered {
             let svc = services[name]!
@@ -273,6 +419,34 @@ extension ComposeFile {
                 Self.serviceLabel: name,
             ]
             specs[name] = spec
+
+            // Record a real (non-disabled) healthcheck. Disabled probes (.none)
+            // are intentionally not registered — no gating, no preview.
+            if let hc = svc.healthcheck, hc.probe != .none {
+                healthchecks[name] = hc
+            }
+
+            // `service_healthy` dependencies: only gate on ones that declare a
+            // healthcheck. A `service_healthy` dep without one can never become
+            // healthy, so rather than block forever we warn and treat it as
+            // started-only. Topological order guarantees the dep was processed
+            // (and registered in `healthchecks`) before this service.
+            let healthyConditions = svc.dependsOnConditions
+                .filter { $0.value == "service_healthy" }
+            if !healthyConditions.isEmpty {
+                var gated: [String] = []
+                for dep in healthyConditions.keys.sorted() where services[dep] != nil {
+                    if healthchecks[dep] != nil {
+                        gated.append(dep)
+                    } else {
+                        warnings.insert(
+                            "Service \"\(name)\": depends_on \"\(dep)\" with condition "
+                            + "service_healthy, but \"\(dep)\" declares no healthcheck — "
+                            + "starting after it is started instead.")
+                    }
+                }
+                if !gated.isEmpty { healthyDeps[name] = gated }
+            }
         }
 
         let declaredNetworks = (networks?.keys ?? [:].keys).map { "\(project)_\($0)" }.sorted()
@@ -283,7 +457,9 @@ extension ComposeFile {
             specs: specs,
             declaredNetworks: declaredNetworks,
             declaredVolumes: declaredVolumes,
-            warnings: warnings.sorted())
+            warnings: warnings.sorted(),
+            healthchecks: healthchecks,
+            healthyDeps: healthyDeps)
     }
 
     /// Resolve a `source:target[:mode]` short-syntax volume into the engine's CLI

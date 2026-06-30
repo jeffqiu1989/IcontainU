@@ -85,9 +85,10 @@ the whole project up in dependency order. Projects persist on disk, so a project
 
 A practical subset of compose is supported — `image`, `command`, `ports`, `environment`
 (list **and** map form), `volumes` (named **and** bind), `networks`, `depends_on` (start
-order), `container_name`, `user`, and top‑level `networks:` / `volumes:`. Unsupported fields
-(`build:`, `healthcheck:`, `restart:`, `${VAR}` interpolation, `profiles`, `secrets`, …)
-are surfaced as a warning banner instead of failing silently.
+order **and** `condition: service_healthy`), `healthcheck`, `container_name`, `user`, and
+top‑level `networks:` / `volumes:`. Unsupported fields (`build:`, `restart:`, `${VAR}`
+interpolation, `profiles`, `secrets`, …) are surfaced as a warning banner instead of
+failing silently.
 
 See **Compose — supported subset & limitations** below for the exact field matrix and the
 runtime constraints (especially around DNS and bind mounts).
@@ -159,13 +160,28 @@ This is **0.1.0** — early, but already useful day to day.
 **Supported fields.** `image`, `command` (string **or** array), `ports` (numeric and
 `host:container/proto`), `environment` (list `["K=V"]` **and** map `{K: V}`), `volumes`
 (named `vol:/data` and bind `/host:/data[:ro]`, incl. relative `./`), `networks`,
-`depends_on` (start order; `condition:` ignored), `container_name`, `user`, and top‑level
-`networks:` / `volumes:`.
+`depends_on` (start order **and** `condition: service_healthy`), `healthcheck`,
+`container_name`, `user`, and top‑level `networks:` / `volumes:`.
+
+**Healthcheck & startup gating.** A service's `healthcheck` (`test` as `CMD` / `CMD-SHELL`,
+plus `interval`, `timeout`, `retries`, `start_period`) is honored **at Up time** to gate
+`depends_on: { dep: { condition: service_healthy } }`: a dependent is not created until its
+gated dependency's probe passes. Apple `container` 1.0.0 has **no native healthcheck**
+(`RuntimeStatus` is only running/stopped), so the probe runs via `container exec` with a
+per‑probe timeout; the state machine (start‑period grace, consecutive‑failure counting)
+lives in IcontainU and only runs during Up — there is no always‑on healthy/unhealthy badge.
+If a gated dependency never becomes healthy, Up fails but the dependency container is left
+running so its logs can be inspected (Containers tab → Logs); fix the compose file and
+re‑Up. A `service_healthy` dependency that declares **no** healthcheck is reported as a
+warning and treated as start‑order only (it can never gate). `test: ["NONE"]` /
+`disable: true` disables a check; `start_interval` is parsed but ignored (no real‑world use).
 
 **Not supported** (reported as a warning banner, never silently dropped):
-`build:`, `healthcheck:`, `depends_on: condition: service_healthy`, `restart:`,
-`deploy.replicas` / scale, `${VAR}` interpolation / `.env` / `env_file`, `profiles`,
-`secrets`, `configs`, `extends`, YAML anchors, and advanced `driver_opts`.
+`build:`, `restart:`, `deploy.replicas` / scale, `${VAR}` interpolation / `.env` /
+`env_file`, `profiles`, `secrets`, `configs`, `extends`, YAML anchors, and advanced
+`driver_opts`. (Because `${VAR}` interpolation and `secrets`/`build` are unsupported, the
+official multi‑service stacks that combine them — e.g. the TLS‑enabled Elastic stack — can
+be parsed and previewed but not brought up as‑is.)
 
 **Runtime constraints** (from Apple `container` 1.0.0 on macOS 26 — not bugs in IcontainU):
 
