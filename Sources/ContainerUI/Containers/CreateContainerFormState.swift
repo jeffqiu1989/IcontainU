@@ -38,10 +38,18 @@ struct MountRow: Identifiable {
 
     let id = UUID()
     var kind: Kind = .volume
-    /// Volume name (kind == .volume) or host path (kind == .bind).
-    var source: String = ""
+    /// Volume name, used when `kind == .volume`. Kept independent of `bindPath` so
+    /// toggling between Volume and Bind never discards the other mode's value.
+    var volumeName: String = ""
+    /// Host path, used when `kind == .bind`. See `volumeName`.
+    var bindPath: String = ""
     var containerPath: String = ""
     var readOnly: Bool = false
+
+    /// The active source for the current `kind`: the volume name or the host path.
+    var source: String {
+        kind == .volume ? volumeName : bindPath
+    }
 
     /// CLI form "source:dest[:ro]"; nil if either side is blank so the row is dropped.
     var cliValue: String? {
@@ -114,7 +122,7 @@ final class CreateContainerFormState {
         let mappedEnvs = metadata.userEnv.map { EnvRow(key: $0, value: "") }
         envs = mappedEnvs.isEmpty ? [EnvRow()] : mappedEnvs
         // Volumes: container path pre-filled from VOLUME, source left for the user.
-        let mappedMounts = metadata.volumes.map { MountRow(kind: .volume, source: "", containerPath: $0) }
+        let mappedMounts = metadata.volumes.map { MountRow(kind: .volume, containerPath: $0) }
         mounts = mappedMounts.isEmpty ? [MountRow()] : mappedMounts
     }
 

@@ -11,6 +11,12 @@ struct CreateContainerSheet: View {
     @FocusState private var imageFieldFocused: Bool
     /// Keyboard-highlighted row in the image suggestion list (arrow-key navigation).
     @State private var highlightedSuggestion = 0
+    /// Measured height of the image text field, so the suggestion list floats just
+    /// below it without a magic offset.
+    @State private var imageFieldHeight: CGFloat = FieldHeightKey.defaultValue
+    /// The mount row whose volume suggestion list is currently open, raised in
+    /// zIndex so its floating list paints above the rows and sections below.
+    @State private var activeMountRowID: MountRow.ID?
     /// Pull / analyze error surfaced as an alert inside this sheet so it's not
     /// hidden behind the modal (the model's banner lives in ContainersView).
     @State private var pullError: OperationError?
@@ -72,6 +78,7 @@ struct CreateContainerSheet: View {
             height: 640
         ) {
             imageSection
+                .zIndex(1)  // keep the floating suggestion list above later rows
             nameSection
             portsSection
             envSection
@@ -110,8 +117,9 @@ struct CreateContainerSheet: View {
     private var imageSection: some View {
         LabeledSection(label: "Image") {
             HStack(alignment: .top, spacing: 8) {
-                // The field and its suggestion list share a column so the dropdown
-                // lines up exactly under the input (not under the button).
+                // The field and its progress bar share a column so both line up
+                // under the input. The suggestion list is a floating overlay (see
+                // below) so it doesn't push the rest of the form down.
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("nginx:latest", text: $form.image)
                         .textFieldStyle(.roundedBorder)
@@ -125,12 +133,24 @@ struct CreateContainerSheet: View {
                         }
                         .onChange(of: form.image) { _, _ in highlightedSuggestion = 0 }
                         .onChange(of: imageFieldFocused) { _, _ in highlightedSuggestion = 0 }
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: FieldHeightKey.self, value: geo.size.height)
+                            }
+                        )
+                        .onPreferenceChange(FieldHeightKey.self) { imageFieldHeight = $0 }
+                        // Float the suggestion list just below the field (offset by
+                        // its measured height) so it overlays following rows instead
+                        // of displacing them and never covers the field. The section's
+                        // raised zIndex (in `body`) keeps it above later rows.
+                        .overlay(alignment: .topLeading) {
+                            if suggestionsVisible {
+                                suggestionList.offset(y: imageFieldHeight + 4)
+                            }
+                        }
                     if let progress = model.pulling {
                         InlineProgressBar(progress: progress, accent: Palette.containers,
                                           onCancel: { model.cancelPull() })
-                    }
-                    if suggestionsVisible {
-                        suggestionList
                     }
                 }
                 loadButton
@@ -233,14 +253,11 @@ struct CreateContainerSheet: View {
         LabeledSection(label: "Ports") {
             ForEach($form.ports) { $row in
                 HStack(spacing: 6) {
-                    Picker("", selection: $row.proto) {
-                        Text("TCP").tag("tcp")
-                        Text("UDP").tag("udp")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .padding(.horizontal, -8)
-                    .frame(width: 60)
+                    SegmentedToggle(selection: $row.proto, segments: [
+                        .init("tcp", text: "TCP"),
+                        .init("udp", text: "UDP"),
+                    ])
+                    .frame(width: 76)
                     TextField("host", text: $row.hostPort)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 62)
@@ -295,35 +312,42 @@ struct CreateContainerSheet: View {
         LabeledSection(label: "Volumes") {
             ForEach($form.mounts) { $row in
                 mountRow($row, isFirst: $row.wrappedValue.id == form.mounts.first?.id)
+                    // Raise the row whose volume list is open so it floats above the
+                    // rows below it.
+                    .zIndex(row.id == activeMountRowID ? 1 : 0)
             }
         }
+        // Raise the whole section above later sections (Network, Command…) while a
+        // volume suggestion list is open, so it isn't painted over.
+        .zIndex(activeMountRowID != nil ? 2 : 0)
     }
 
     @ViewBuilder
     private func mountRow(_ row: Binding<MountRow>, isFirst: Bool) -> some View {
         HStack(spacing: 6) {
-            Picker("", selection: row.kind) {
-                Image(systemName: "externaldrive").tag(MountRow.Kind.volume)
-                Image(systemName: "folder").tag(MountRow.Kind.bind)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, -8)
-            .frame(width: 80)
+            SegmentedToggle(selection: row.kind, segments: [
+                .init(.volume, systemImage: "externaldrive"),
+                .init(.bind, systemImage: "folder"),
+            ])
+            .frame(width: 76)
 
             switch row.wrappedValue.kind {
             case .volume:
-                StyledPicker(
-                    selection: row.source,
-                    options: volumes.map { ($0.name, $0.name) },
-                    placeholder: "Select…",
-                    minWidth: 110,
-                    disabled: volumes.isEmpty)
+                AutocompleteField(
+                    text: row.volumeName,
+                    options: volumes.map(\.name),
+                    placeholder: "volume name",
+                    icon: "externaldrive",
+                    iconColor: Palette.volumes,
+                    onActiveChange: { active in
+                        setMountRowActive(row.wrappedValue.id, active)
+                    })
                 .frame(maxWidth: .infinity, alignment: .leading)
             case .bind:
-                TextField("host path", text: row.source)
+                TextField("host path", text: row.bindPath)
                     .textFieldStyle(.roundedBorder)
                 Button {
-                    chooseDirectory(into: row.source)
+                    chooseDirectory(into: row.bindPath)
                 } label: {
                     Image(systemName: "folder")
                 }
@@ -342,6 +366,15 @@ struct CreateContainerSheet: View {
             } onRemove: {
                 removeMount(row.wrappedValue)
             }
+        }
+    }
+
+    /// Track which mount row's volume suggestion list is open, to drive zIndex.
+    private func setMountRowActive(_ id: MountRow.ID, _ active: Bool) {
+        if active {
+            activeMountRowID = id
+        } else if activeMountRowID == id {
+            activeMountRowID = nil
         }
     }
 

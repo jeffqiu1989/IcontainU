@@ -17,10 +17,17 @@ struct ImportComposeSheet: View {
     @State private var originalFile: ComposeFile?
     @State private var analyzeError: String?
 
-    /// Volumes referenced across all services (for the volume picker).
+    /// Volumes referenced across all services (for the volume picker). The form
+    /// stores each mount's source as the raw, unprefixed YAML volume name (e.g.
+    /// `data`), so the picker options must be unprefixed too — otherwise the parsed
+    /// selection never matches an option and the picker falls back to "Choose…".
+    /// The project prefix is reapplied later in `makeSpec`.
     private var composeVolumes: [VolumeConfiguration] {
-        formState.declaredVolumes.map {
-            VolumeConfiguration(name: $0, source: "compose_\($0)")
+        formState.declaredVolumes.map { full in
+            let unprefixed = full.hasPrefix(formState.projectName + "_")
+                ? String(full.dropFirst(formState.projectName.count + 1))
+                : full
+            return VolumeConfiguration(name: unprefixed, source: "compose_\(unprefixed)")
         }
     }
 
@@ -281,6 +288,10 @@ private struct ServiceEditorCard: View {
     let composeVolumes: [VolumeConfiguration]
     let composeNetworkOptions: [(value: NetworkSelection, title: String)]
 
+    /// The mount row whose volume suggestion list is open — drives zIndex so the
+    /// floating list paints above the card rows (Networks, Command…) below it.
+    @State private var activeMountIndex: Int?
+
     /// Shared label-column width so every row in the card lines up.
     private static let labelWidth: CGFloat = 92
 
@@ -365,25 +376,24 @@ private struct ServiceEditorCard: View {
             }
             if !config.mounts.isEmpty {
                 cardRow("Volumes") { mountRows }
+                    // Raise the Volumes row above the rows below it while a volume
+                    // suggestion list is open, so it isn't painted over.
+                    .zIndex(activeMountIndex != nil ? 1 : 0)
             }
             if !config.networks.isEmpty {
                 cardRow("Networks") { networkRows }
             }
 
-            if config.showCommandRow {
-                cardRow("Command") {
-                    TextField("command", text: $config.command)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                }
+            cardRow("Command") {
+                TextField("command", text: $config.command)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
             }
 
-            if config.showUserRow {
-                cardRow("User") {
-                    TextField("user (optional)", text: $config.user)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 120, alignment: .leading)
-                }
+            cardRow("User") {
+                TextField("user (optional)", text: $config.user)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 120, alignment: .leading)
             }
 
             if !config.dependsOn.isEmpty {
@@ -398,34 +408,6 @@ private struct ServiceEditorCard: View {
                         .lineLimit(2)
                 }
             }
-
-            addFieldMenu
-
-            if !config.ignored.isEmpty {
-                unsupportedWarning
-            }
-        }
-    }
-
-    /// A menu to reveal the optional command / user editors when they were hidden
-    /// (no value parsed). Only shows entries for fields not already visible.
-    @ViewBuilder
-    private var addFieldMenu: some View {
-        if !config.showCommandRow || !config.showUserRow {
-            Menu {
-                if !config.showCommandRow {
-                    Button("Command") { config.showCommandRow = true }
-                }
-                if !config.showUserRow {
-                    Button("User") { config.showUserRow = true }
-                }
-            } label: {
-                Label("Add field", systemImage: "plus.circle")
-                    .font(.caption)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -451,36 +433,16 @@ private struct ServiceEditorCard: View {
         }
     }
 
-    /// A distinct warning row (not a normal field row) for the fields we parsed but
-    /// don't support — they were dropped, so this is informational, not editable.
-    private var unsupportedWarning: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.orange)
-            Text("Not supported, ignored: " + config.ignored.joined(separator: ", "))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-    }
-
     // MARK: - Port rows
 
     private var portRows: some View {
         ForEach(Array(config.ports.enumerated()), id: \.offset) { index, _ in
             HStack(spacing: 6) {
-                Picker("", selection: $config.ports[index].proto) {
-                    Text("TCP").tag("tcp")
-                    Text("UDP").tag("udp")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, -8)
-                .frame(width: 60)
+                SegmentedToggle(selection: $config.ports[index].proto, segments: [
+                    .init("tcp", text: "TCP"),
+                    .init("udp", text: "UDP"),
+                ])
+                .frame(width: 76)
                 TextField("host", text: $config.ports[index].hostPort)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 70)
@@ -514,32 +476,31 @@ private struct ServiceEditorCard: View {
     private var mountRows: some View {
         ForEach(Array(config.mounts.enumerated()), id: \.offset) { index, _ in
             HStack(spacing: 6) {
-                Picker("", selection: $config.mounts[index].kind) {
-                    Image(systemName: "externaldrive").tag(MountRow.Kind.volume)
-                    Image(systemName: "folder").tag(MountRow.Kind.bind)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, -8)
-                .frame(width: 80)
+                // Volume name and bind path are stored independently, so switching
+                // kind preserves whatever was entered for the other mode.
+                SegmentedToggle(selection: $config.mounts[index].kind, segments: [
+                    .init(.volume, systemImage: "externaldrive"),
+                    .init(.bind, systemImage: "folder"),
+                ])
+                .frame(width: 76)
                 switch config.mounts[index].kind {
                 case .volume:
-                    if composeVolumes.isEmpty {
-                        TextField("volume_name", text: $config.mounts[index].source)
-                            .textFieldStyle(.roundedBorder)
-                    } else {
-                        StyledPicker(
-                            selection: $config.mounts[index].source,
-                            options: composeVolumes.map { ($0.name, $0.name) },
-                            placeholder: "Choose…",
-                            minWidth: 120)
-                        .frame(maxWidth: 160, alignment: .leading)
-                    }
+                    AutocompleteField(
+                        text: $config.mounts[index].volumeName,
+                        options: composeVolumes.map(\.name),
+                        placeholder: "volume_name",
+                        icon: "externaldrive",
+                        iconColor: Palette.volumes,
+                        onActiveChange: { active in
+                            activeMountIndex = active ? index : (activeMountIndex == index ? nil : activeMountIndex)
+                        })
+                    .frame(maxWidth: 200, alignment: .leading)
                 case .bind:
-                    TextField("~/path", text: $config.mounts[index].source)
+                    TextField("~/path", text: $config.mounts[index].bindPath)
                         .textFieldStyle(.roundedBorder)
                     Button {
                         if let dir = chooseDirectory() {
-                            config.mounts[index].source = dir.path
+                            config.mounts[index].bindPath = dir.path
                         }
                     } label: {
                         Image(systemName: "folder")
@@ -555,6 +516,7 @@ private struct ServiceEditorCard: View {
                     .help("Mount read-only")
                 Spacer(minLength: 0)
             }
+            .zIndex(index == activeMountIndex ? 1 : 0)
         }
     }
 

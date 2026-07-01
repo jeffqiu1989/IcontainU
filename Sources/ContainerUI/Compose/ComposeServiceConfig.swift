@@ -30,13 +30,6 @@ final class ComposeServiceConfig: Identifiable {
     var networks: [NetworkRow]
     var user: String
 
-    /// Whether the command / user editor rows are shown. The card hides a field
-    /// with no parsed value (to keep cards tight), but the user can reveal an empty
-    /// row via the card's "Add field" menu — these flags drive that. Initialized
-    /// `true` when the field already has a value so existing values always show.
-    var showCommandRow: Bool
-    var showUserRow: Bool
-
     // Read-only display fields (from the decoded YAML, not editable in the form).
     var dependsOn: [String]
     var dependsOnConditions: [String: String]
@@ -72,8 +65,6 @@ final class ComposeServiceConfig: Identifiable {
         self.mounts = mounts
         self.networks = networks
         self.user = user
-        self.showCommandRow = !command.isEmpty
-        self.showUserRow = !user.trimmingCharacters(in: .whitespaces).isEmpty
         self.dependsOn = dependsOn
         self.dependsOnConditions = dependsOnConditions
         self.healthcheck = healthcheck
@@ -245,8 +236,12 @@ final class ComposeServiceConfig: Identifiable {
             let target = parts.count >= 2 ? parts[1] : ""
             let mode = parts.count >= 3 ? parts[2] : nil
             let kind: MountRow.Kind = source.contains("/") || source.hasPrefix("~") ? .bind : .volume
-            return MountRow(kind: kind, source: source, containerPath: target,
-                            readOnly: mode == "ro")
+            return MountRow(
+                kind: kind,
+                volumeName: kind == .volume ? source : "",
+                bindPath: kind == .bind ? source : "",
+                containerPath: target,
+                readOnly: mode == "ro")
         }
     }
 
