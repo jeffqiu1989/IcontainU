@@ -9,4 +9,3 @@ DerivedData/
 *.xcodeproj
 .netrc
 .claude/
-.gitignore

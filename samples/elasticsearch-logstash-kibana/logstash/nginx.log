@@ -1,3 +1,0 @@
-{"remote_ip": "89.160.20.112", "remote_user": "-", "time_local": "30/Jun/2026:04:00:00 +0000", "request": "GET /index.html HTTP/1.1", "status": "200", "body_bytes_sent": "612", "referer": "-", "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-{"remote_ip": "203.0.113.50", "remote_user": "-", "time_local": "30/Jun/2026:04:00:01 +0000", "request": "GET /api/health HTTP/1.1", "status": "200", "body_bytes_sent": "42", "referer": "-", "agent": "curl/8.7.1"}
-{"remote_ip": "198.51.100.23", "remote_user": "admin", "time_local": "30/Jun/2026:04:00:02 +0000", "request": "POST /login HTTP/1.1", "status": "302", "body_bytes_sent": "0", "referer": "https://example.com/", "agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
