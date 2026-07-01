@@ -426,6 +426,33 @@ struct ComposeParserTests {
         }
     }
 
+    /// Interpolation end-to-end against the committed `samples/postgresql-pgadmin`
+    /// example — the one interpolation sample that actually runs under macOS. It's
+    /// in-repo (not `~/awesome-compose`), so this is hermetic: `.env` → interpolate
+    /// → parse → toSpecs, asserting no `${` survives and the `.env` values resolve
+    /// into the container specs.
+    @Test func interpolatedSampleResolves() throws {
+        // Locate the repo root from this test file: Tests/ContainerUITests/<file>.
+        let base = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // ContainerUITests
+            .deletingLastPathComponent()  // Tests
+            .deletingLastPathComponent()  // repo root
+            .appending(path: "samples/postgresql-pgadmin")
+        let yaml = try String(contentsOf: base.appending(path: "compose.yaml"), encoding: .utf8)
+
+        let interpolated = try EnvInterpolator.interpolate(yaml: yaml, baseDirectory: base)
+        // No `${` may survive interpolation.
+        #expect(!interpolated.text.contains("${"))
+        #expect(interpolated.warnings.isEmpty)
+
+        let file = try ComposeParser.parse(yaml: interpolated.text)
+        let result = try file.toSpecs(project: "postgresql-pgadmin", baseDirectory: base)
+        // Both services lower cleanly with their `.env` values substituted.
+        #expect(result.specs["postgres"]?.env.contains("POSTGRES_USER=yourUser") == true)
+        #expect(result.specs["postgres"]?.env.contains("POSTGRES_PASSWORD=changeit") == true)
+        #expect(result.specs["pgadmin"]?.env.contains("PGADMIN_DEFAULT_EMAIL=your@email.com") == true)
+    }
+
     // MARK: healthcheck parsing
 
     @Test func healthcheckCmdArray() throws {

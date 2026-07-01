@@ -159,15 +159,27 @@ final class ComposeModel {
     /// Parse + lower for the import sheet's preview. Throws a `ComposeError` (or a
     /// Yams decode error) the sheet renders inline.
     func analyze(yaml: String, baseDirectory: URL?, projectName: String) throws -> ComposeParseResult {
-        let file = try ComposeParser.parse(yaml: yaml)
-        return try file.toSpecs(project: projectName, baseDirectory: baseDirectory)
+        let (_, result) = try analyzeWithFile(
+            yaml: yaml, baseDirectory: baseDirectory, projectName: projectName)
+        return result
     }
 
     /// Parse + lower returning both the file (for override diffing) and the result.
+    /// `${VAR}` references are interpolated from the compose file's `.env` before
+    /// parsing; any undefined-variable warnings are merged into the result.
     func analyzeWithFile(yaml: String, baseDirectory: URL?, projectName: String) throws -> (ComposeFile, ComposeParseResult) {
-        let file = try ComposeParser.parse(yaml: yaml)
-        let result = try file.toSpecs(project: projectName, baseDirectory: baseDirectory)
+        let interpolated = try EnvInterpolator.interpolate(yaml: yaml, baseDirectory: baseDirectory)
+        let file = try ComposeParser.parse(yaml: interpolated.text)
+        var result = try file.toSpecs(project: projectName, baseDirectory: baseDirectory)
+        result.warnings = Self.mergeWarnings(result.warnings, interpolated.warnings)
         return (file, result)
+    }
+
+    /// Merge parse warnings with interpolation warnings, deduplicated and sorted
+    /// (matching the ordering `toSpecs` already produces).
+    private static func mergeWarnings(_ base: [String], _ extra: [String]) -> [String] {
+        guard !extra.isEmpty else { return base }
+        return Array(Set(base).union(extra)).sorted()
     }
 
     /// Whether a project with this name is already stored (warn before overwrite).
@@ -214,7 +226,9 @@ final class ComposeModel {
             parse = prebuilt
         } else {
             do {
-                var file = try ComposeParser.parse(yaml: record.yaml)
+                let interpolated = try EnvInterpolator.interpolate(
+                    yaml: record.yaml, baseDirectory: record.baseDirectory)
+                var file = try ComposeParser.parse(yaml: interpolated.text)
                 if let overrides = record.serviceOverrides, !overrides.isEmpty {
                     file = file.applyOverrides(overrides)
                 }

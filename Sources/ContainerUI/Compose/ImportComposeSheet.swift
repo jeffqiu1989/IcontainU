@@ -2,10 +2,11 @@ import ContainerResource
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Import a compose file: choose a file (or paste YAML), Analyze to parse
-/// services into editable cards, then Up. Each service's image, ports, env,
-/// volumes, networks, command, user, and container name are configurable before
-/// bringing the project up.
+/// Import a compose file: choose the file, Analyze to parse services into
+/// editable cards, then Up. `${VAR}` references are interpolated from the file's
+/// `.env` during Analyze. Each service's image, ports, env, volumes, networks,
+/// command, user, and container name are configurable before bringing the project
+/// up.
 struct ImportComposeSheet: View {
     @Environment(\.dismiss) private var dismiss
     let model: ComposeModel
