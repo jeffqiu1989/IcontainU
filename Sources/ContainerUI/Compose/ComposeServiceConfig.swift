@@ -101,23 +101,34 @@ final class ComposeServiceConfig: Identifiable {
     }
 
     /// Convert the edited form state back to a `ContainerCreateSpec` for the
-    /// create engine. Named volumes and networks are project-prefixed here.
-    func makeSpec(project: String, serviceLabel: String) -> ContainerCreateSpec {
+    /// create engine. Named volumes and networks are project-prefixed here; bind
+    /// mount host paths are resolved to absolute paths against `baseDirectory`
+    /// (the compose file's directory), matching docker compose semantics.
+    func makeSpec(project: String, serviceLabel: String, baseDirectory: URL?) throws -> ContainerCreateSpec {
         var spec = ContainerCreateSpec(image: image.trimmingCharacters(in: .whitespaces))
         spec.name = containerName.isEmpty ? nil : containerName
         spec.command = CommandTokenizer.tokenize(command)
         spec.publishPorts = ports.compactMap(\.cliValue)
         spec.env = envs.compactMap(\.cliValue)
 
-        // Resolve volumes: named volumes (no "/") get the project prefix.
-        spec.volumes = mounts.compactMap { mount -> String? in
-            guard let cli = mount.cliValue else { return nil }
-            if mount.kind == .volume {
-                let parts = cli.split(separator: ":", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else { return cli }
-                return "\(project)_\(parts[0]):\(parts[1])"
+        // Resolve each mount to a "source:target[:ro]" entry: named volumes get the
+        // project prefix; bind host paths are resolved to an absolute path so the
+        // engine (which has no notion of the compose file's directory) can find them.
+        spec.volumes = try mounts.compactMap { mount -> String? in
+            let target = mount.containerPath.trimmingCharacters(in: .whitespaces)
+            guard !target.isEmpty else { return nil }
+            let source: String
+            switch mount.kind {
+            case .volume:
+                let name = mount.volumeName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return nil }
+                source = "\(project)_\(name)"
+            case .bind:
+                let path = mount.bindPath.trimmingCharacters(in: .whitespaces)
+                guard !path.isEmpty else { return nil }
+                source = try Self.resolveBindPath(path, service: serviceName, baseDirectory: baseDirectory)
             }
-            return cli
+            return mount.readOnly ? "\(source):\(target):ro" : "\(source):\(target)"
         }
 
         // Resolve networks with project prefix. If no networks are selected,
@@ -204,6 +215,26 @@ final class ComposeServiceConfig: Identifiable {
     }
 
     // MARK: - Parsing helpers
+
+    /// Resolve a bind mount host path to an absolute path, mirroring
+    /// `ComposeFile.resolveVolume`: absolute paths pass through, `~` expands to the
+    /// home directory, and a relative path is resolved against `baseDirectory` (the
+    /// compose file's directory). Relative paths without a base directory can't be
+    /// resolved — the same error the non-editable Up path raises.
+    private static func resolveBindPath(
+        _ source: String, service: String, baseDirectory: URL?
+    ) throws -> String {
+        if source.hasPrefix("/") {
+            return source
+        }
+        if source.hasPrefix("~") {
+            return (source as NSString).expandingTildeInPath
+        }
+        guard let base = baseDirectory else {
+            throw ComposeError.relativeBindWithoutBaseDirectory(service: service, source: source)
+        }
+        return URL(fileURLWithPath: source, relativeTo: base).standardizedFileURL.path
+    }
 
     private static func parsePorts(_ raw: [String]) -> [PortRow] {
         // No placeholder fallback: an empty result hides the section in the editor.

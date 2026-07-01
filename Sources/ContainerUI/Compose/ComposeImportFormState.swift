@@ -61,9 +61,10 @@ final class ComposeImportFormState {
 
         var specs: [String: ContainerCreateSpec] = [:]
         for config in serviceConfigs {
-            let spec = config.makeSpec(
+            let spec = try config.makeSpec(
                 project: projectName,
-                serviceLabel: config.serviceName
+                serviceLabel: config.serviceName,
+                baseDirectory: baseDirectory
             )
             specs[config.serviceName] = spec
         }
