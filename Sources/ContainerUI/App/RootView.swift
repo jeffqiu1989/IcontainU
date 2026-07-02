@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(SystemModel.self) private var system
+    @Environment(ComposeModel.self) private var composeModel
     @State private var selection: SidebarItem = .containers
 
     var body: some View {
@@ -23,6 +24,9 @@ struct RootView: View {
         }
         .task {
             await system.startMonitoring()
+        }
+        .task {
+            await composeModel.startPolling()
         }
     }
 

@@ -42,9 +42,6 @@ struct ComposeView: View {
                 .disabled(model.upping != nil)
             }
         }
-        .task {
-            await model.startPolling()
-        }
         .sheet(isPresented: $showingImport) {
             ImportComposeSheet(model: model)
         }
