@@ -14,25 +14,24 @@
 
 ---
 
+## 亮点
+
 两个功能，值得你把它放进 Dock：
 
-## ⚡ 智能创建 — 放入镜像，表单自动填满
+| ⚡ 智能创建 | 🧩 一键 Compose |
+| --- | --- |
+| <img src="docs/screenshots/Auto_fill.gif" alt="Auto-fill demo" /> | <img src="docs/screenshots/Compose_Demo.gif" alt="Compose demo" /> |
+| **放入镜像，表单自动填满。** 端口、挂载，以及入口脚本*真正需要*的环境变量（如 `MYSQL_ROOT_PASSWORD`）都从镜像中读出并预填。不必再抄 `docker run` 片段。 | **一键拉起整个技术栈。** 导入 `compose.yaml`，按依赖顺序 Up 整个项目，含 `healthcheck` 门控。项目落盘持久化，`down` 或重启后仍在 —— 还绕过了 Apple `container` 失效的容器间 DNS，让服务名开箱即用。 |
 
-<img src="docs/screenshots/Auto_fill.gif" width="100%" alt="Auto-fill demo" />
+## 更多功能
 
-选中一个镜像，IcontainU 替你读懂它。`EXPOSE` 变成端口行，`VOLUME` 变成挂载行，入口脚本**真正需要**
-的环境变量（如 `MYSQL_ROOT_PASSWORD`）会被提取并预填 — 不只是构建时的默认值。不必再对着仓库页面
-抄 `docker run` 片段：你想要的容器，一键即成。
+- **🐧 开箱即用的虚拟机** —— 内置指向官方 *init 就绪镜像*的预设（Alpine、Rocky UBI‑init），机器真能启动。CPU / 内存 / home 挂载均可设置。
+- **📦 智能镜像拉取** —— 只拉当前主机架构，且支持镜像加速，一键 **DaoCloud 预设**（9 个仓库、可单独开关），且不在本地镜像上留痕。
+- **🃏 卡片式管理** —— 每个容器卡片都有 启动 / 停止 / Shell / 日志 / 删除，外加实时 **Stats** 与流式日志。
+- **✨ 消除摩擦** —— 点击复制 IP 或 `ip:port`，点击挂载在 Finder 打开，本地镜像自动补全，Docker 风格自动命名。
+- **🚀 无摩擦初始化** —— 首次启动自动安装 kernel，并持续监控 `container` 健康状态。
 
-## 🧩 Compose — 一键拉起整个技术栈
-
-<img src="docs/screenshots/Compose_Demo.gif" width="100%" alt="Compose demo" />
-
-导入 `compose.yaml`，预览服务、网络与卷，再**按依赖顺序**一键拉起整个项目 — 含 `healthcheck` 门控，
-让一个服务等到它依赖的服务真正就绪才启动。项目落盘持久化，`down` 或重启后仍保留，随时可重新 Up。
-它甚至绕过了 Apple `container` 在 macOS 26 上失效的容器间 DNS，让服务名发现开箱即用。
-
-## 更多截图
+## 截图
 
 | 容器 | 创建容器 |
 | --- | --- |
@@ -46,105 +45,56 @@
 | --- | --- |
 | ![Registry mirrors](docs/screenshots/Mirrors.png) | ![DaoCloud preset](docs/screenshots/Mirrors_DaoCloud.png) |
 
-## 简介
-
-IcontainU 是一个原生 macOS 应用 (SwiftUI, Swift 6.2)，通过 XPC 与 Apple 的 `container` 系统通信。它**不包含任何容器运行时** — 只是你已安装的 `container` 的前端。基于以下项目构建：
-
-- [`apple/container`](https://github.com/apple/container) — 运行时和 API 客户端
-- [`apple/containerization`](https://github.com/apple/containerization) — OCI / 镜像处理
-- [`apple/swift-log`](https://github.com/apple/swift-log)
-
-## 功能
-
-除了上面两个王牌功能：
-
-### 🐧 开箱即用的虚拟机
-Apple 的 `container machine` 需要包含 **init 系统**的镜像 — 而标准的 `ubuntu` / `debian` /
-`fedora` 镜像没有，所以会静默启动失败。IcontainU 内置了指向**官方 init 就绪镜像**的预设（Alpine、
-Rocky Linux 8 / 9 / 10 UBI‑init）：选择即启动。CPU / 内存 / home 挂载模式、默认虚拟机均可设置。
-
-### 📦 智能镜像拉取
-- 只拉取**当前主机架构** — 更小更快、无冗余（Apple 的 `container pull` 默认拉取*所有*架构）。
-- **镜像加速支持**，一键 **DaoCloud 预设**覆盖 9 个常用仓库（Docker Hub、GCR、GHCR、Quay、NVIDIA
-  等），每个加速源可单独开关。
-- 加速是纯 GUI 重写层：镜像被重标记为规范名称，**不在本地镜像上留下任何痕迹**。
-
-### 🃏 卡片式管理
-每个容器卡片都有 **启动 / 停止 / Shell / 日志 / 删除**，实时 **Stats** 标签页（CPU、内存、网络、
-块 I/O、进程数），以及**流式日志**（支持 follow 和复制）。
-
-### ✨ 消除摩擦
-点击 IP 复制 IP，点击端口复制 `ip:port`（如 `127.0.0.1:8080`），点击挂载在 Finder 中打开。还有本地
-镜像自动补全、**分析 vs. 拉取**按钮（知道镜像是否已本地存在）、Docker 风格自动命名（`brave_turing`）
-而非裸 UUID。
-
-### 🚀 无摩擦初始化
-首次启动**自动安装 kernel**；应用持续监控 `container` 健康状态；如果 `container` 尚未安装，一键跳转到
-releases 页面。
-
 ## 环境要求
 
-- **Apple silicon** Mac（M 系列）
-- **macOS 26** 或更新版本
+- **Apple silicon** Mac（M 系列），**macOS 26** 或更新版本
+- 已安装 Apple [`container`](https://github.com/apple/container/releases) ≥ 1.0.0
 
-### 1. 安装 Apple `container`（≥ 1.0.0）
-
-从 GitHub releases 下载：
-
-```bash
-# https://github.com/apple/container/releases
-```
-
-### 2. 启动 container 系统并安装 kernel
-
-建议首次从命令行启动 — 系统会提示安装 kernel：
+建议首次从命令行启动一次，让它安装好 kernel（比应用内下载更快）：
 
 ```bash
 container system start
 container system status   # 应报告: running
 ```
 
-> **提示：** 如果跳过此步骤直接打开 IcontainU，应用会自动安装 kernel，但下载较慢（后台约 60 MB）。命令行安装更快。
-
-> 如果 `container` 系统未运行，应用仍可打开，但侧边栏为空。
+如果 `container` 系统未运行，应用仍可打开，但侧边栏为空。
 
 ## 下载与安装
 
-下载 `IcontainU-v0.1.0.zip`，解压后将 `IcontainU.app` 移到 Applications。
+从 [Releases](../../releases) 下载 `IcontainU-v0.2.0.zip`，解压后将 `IcontainU.app` 移到 Applications。
 
-未公证。首次启动会被 macOS 阻止 — 右键 → 打开，或系统设置 → 隐私与安全性 → 仍要打开，或 `xattr -d com.apple.quarantine /Applications/IcontainU.app`。
+未公证 —— 首次启动请右键 → 打开，或运行：
+
+```bash
+xattr -d com.apple.quarantine /Applications/IcontainU.app
+```
 
 ## 从源码构建
 
 需要 Swift 6.2 工具链（Xcode 26）。
 
 ```bash
-swift build
-swift run IcontainU
-```
-
-### 打包
-
-```bash
-./scripts/package-app.sh          # → build/IcontainU.app  (ad-hoc 签名)
-cd build && zip -r -y IcontainU.zip IcontainU.app
+swift build && swift run IcontainU
+# 打包签名后的 .app：
+./scripts/package-app.sh
 ```
 
 ## 状态与已知限制
 
-当前为 **0.1.0** — 早期版本，但日常使用已足够。
+**0.2.0** —— 早期版本，但日常使用已足够。
 
-- `Shell` / `exec` 打开系统 Terminal.app — 尚未内嵌终端。
+- `Shell` 打开系统 Terminal.app —— 尚未内嵌终端。
 - 系统配置在应用中**只读**；请通过 CLI 编辑。
-- 容器按 id 排序。
 - 菜单栏功能正在开发中。
 
 ## Compose 参考
 
-IcontainU 支持 Compose 规范的一个**实用子集**。任何不支持的内容都会在导入时以警告横幅提示 —
-**绝不静默丢弃**。
+IcontainU 支持 Compose 规范的一个**实用子集**。任何不支持的内容都会在导入时以警告横幅提示 —— **绝不静默丢弃**。
 
-### 支持的字段
+<details>
+<summary><b>支持的字段与不支持项</b></summary>
+
+<br>
 
 | 字段 | 说明 |
 | --- | --- |
@@ -155,69 +105,51 @@ IcontainU 支持 Compose 规范的一个**实用子集**。任何不支持的内
 | `volumes` | 命名卷（`vol:/data`）与 bind（`/host:/data[:ro]`，含相对路径 `./`） |
 | `networks` | 服务级与顶层 |
 | `depends_on` | 启动顺序**与** `condition: service_healthy` |
-| `healthcheck` | `test`、`interval`、`timeout`、`retries`、`start_period`（见下） |
+| `healthcheck` | `test`、`interval`、`timeout`、`retries`、`start_period` |
 | `container_name`、`user` | — |
 | 顶层 `networks:` / `volumes:` | — |
 
-### 不支持
+以及解析时的 `${VAR}` / `.env` 插值。
 
-`build:` · `restart:` · `deploy.replicas` / scale · `${VAR}` 插值 / `.env` / `env_file`
-· `profiles` · `secrets` · `configs` · `extends` · YAML anchor · 高级 `driver_opts`。
-
-> 由于不支持 `${VAR}` 插值、`secrets` 与 `build`，那些把它们组合在一起的官方栈（例如带 TLS 的
-> Elastic 全家桶）可以解析和预览，但无法原样 Up。
-
-### 项目隔离与多网络
-
-- **每个项目都有命名空间。** 容器、卷、网络都以项目名为前缀（`<project>-<service>`、
-  `<project>_<volume>`、`<project>_<network>`），因此两个都声明 `db` 服务 —— 或都声明 `data` 卷 ——
-  的项目可以并存运行，互不冲突。只有当你在两个项目里钉了**相同的** `container_name:` 时才会硬冲突，此时
-  会明确报错，而不是让一个项目劫持另一个的容器。每个容器同时打上
-  `com.icontainu.compose.project` / `.service` 标签，让一个项目作为整体列出和清理。
-- **完整支持多网络。** 处于多个网络上的服务，会为每个对端给出正确的 IP：服务名解析会挑选双方**实际共享**
-  的那个网络上的地址，符合 compose 网络对连通性的作用域约定。
-
-<details>
-<summary><b>健康检查与启动门控</b> — <code>service_healthy</code> 如何生效</summary>
-
-<br>
-
-服务的 `healthcheck`（`test` 支持 `CMD` / `CMD-SHELL`，以及 `interval`、`timeout`、`retries`、
-`start_period`）在 **Up 期间**生效，用于门控 `depends_on: { dep: { condition: service_healthy } }`
-—— 被依赖方探针通过前，依赖它的服务不会被创建。
-
-Apple `container` 1.0.0 **没有原生健康检查**（`RuntimeStatus` 只有 running/stopped），因此探针通过
-`container exec` 执行并带单次超时。状态机（start_period 宽限期、连续失败计数）由 IcontainU 维护，**仅在
-Up 期间运行** —— 没有常驻的 healthy/unhealthy 角标。
-
-- 若被门控的依赖始终不健康，Up 失败，**但该依赖容器会保留运行**，以便查看日志（Containers 标签页 →
-  Logs）；修正 compose 文件后重新 Up 即可。
-- 声明了 `service_healthy` 但**没有** healthcheck 的依赖，会以警告提示并退化为仅启动顺序（无法门控）。
-- `test: ["NONE"]` / `disable: true` 可禁用某个检查；`start_interval` 会被解析但忽略。
+**不支持：** `build:` · `restart:` · `deploy.replicas` / scale · `env_file` · `profiles` · `secrets` · `configs` · `extends` · YAML anchor · 高级 `driver_opts`。需要它们的栈（如带 TLS 的 Elastic 全家桶）可解析和预览，但无法原样 Up。
 
 </details>
 
 <details>
-<summary><b>运行时限制</b> — Apple <code>container</code> 1.0.0 在 macOS 26 上的行为（非 IcontainU 的 bug）</summary>
+<summary><b>项目隔离与多网络</b></summary>
 
 <br>
 
-- **容器间 DNS 在 macOS 26 上是坏的 —— IcontainU 已绕过。** 运行时把服务名解析到预留地址 `28.0.0.x`，
-  与容器真实 `eth0` IP（`192.168.64.x`）不一致；TCP 握手能通，但有状态协议（MySQL、PostgreSQL 等）会在
-  握手中途失败。IcontainU 在 Up 后把 `<服务名 → 真实 IP>` 注入项目内每个容器的 `/etc/hosts`（IP 变化时
-  也会重新注入，如重启后），这就是服务名发现能用的原因。
-- **数据库数据目录请用命名卷。** 从 macOS 主机目录 bind 进来的挂载点，即便以 root 运行也拒绝 `chown`
-  （文件共享层阻止），因此入口脚本必须 `chown` 数据目录的镜像（mysql/mariadb、postgres）在 bind 挂载上
-  会启动失败。命名卷（如 `db_data:/var/lib/mysql`）可用 —— 这本来就是 compose 的惯例。
-- **非 root 镜像在命名卷上需设 `user: "0"`。** 以非 root 用户运行的镜像（如 prometheus 是 `nobody`）写不了
-  自己的命名卷数据目录而崩溃；设 `user: "0"` 以 root 运行即可，root 可写命名卷的 Linux 文件系统。
+- **每个项目都有命名空间。** 容器、卷、网络都以项目名为前缀，因此两个都声明 `db` 服务的项目可并存运行。在两个项目里钉相同的 `container_name:` 会明确报错，而非互相劫持。
+- **完整支持多网络。** 处于多个网络的服务，会在双方实际共享的网络上解析到正确的对端 IP。
+
+</details>
+
+<details>
+<summary><b>健康检查门控</b> —— <code>service_healthy</code> 如何生效</summary>
+
+<br>
+
+Apple `container` 1.0.0 没有原生健康检查，因此 IcontainU 在 **Up 期间**通过 `container exec` 执行探针，用于门控 `depends_on: { condition: service_healthy }`。没有常驻的 healthy/unhealthy 角标。
+
+- 若被门控的依赖始终不健康，Up 失败，但该依赖容器会保留运行以便查看日志 —— 修正 compose 文件后重新 Up。
+- 声明了 `service_healthy` 但**没有** healthcheck 的依赖，会以警告提示并退化为仅启动顺序。
+
+</details>
+
+<details>
+<summary><b>运行时限制</b> —— Apple <code>container</code> 在 macOS 26 上的行为（非 IcontainU 的 bug）</summary>
+
+<br>
+
+- **容器间 DNS 在 macOS 26 上是坏的 —— IcontainU 已绕过**：Up 后把 `<服务名 → 真实 IP>` 注入每个容器的 `/etc/hosts`。
+- **数据库数据目录请用命名卷。** macOS 主机 bind 拒绝 `chown`，因此需 `chown` 数据目录的镜像（mysql、postgres）在 bind 挂载上会启动失败；命名卷可用。
+- **非 root 镜像在命名卷上需设 `user: "0"`**，否则写不了自己的数据目录。
 
 </details>
 
 ## 许可证与致谢
 
-基于 Apache License 2.0 开源 — 见 [LICENSE](LICENSE)。
-
-IcontainU 基于 Apple 的 `container` 和 `containerization` 项目构建；见 [NOTICE](NOTICE) 的归属说明。
+基于 Apache License 2.0 开源 —— 见 [LICENSE](LICENSE)。基于 Apple 的 `container` 和 `containerization` 构建；见 [NOTICE](NOTICE) 的归属说明。
 
 在 vibe coding（AI 辅助开发）的协助下完成开发。

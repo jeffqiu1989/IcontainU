@@ -9,3 +9,5 @@ DerivedData/
 *.xcodeproj
 .netrc
 .claude/
+/IcontainU.app
+*.zip
