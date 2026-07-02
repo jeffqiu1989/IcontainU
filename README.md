@@ -91,10 +91,7 @@ swift build && swift run IcontainU
 
 IcontainU supports a **practical subset** of the Compose spec. Anything unsupported is surfaced as a warning banner at import — **never silently dropped**.
 
-<details>
-<summary><b>Supported fields &amp; what's not</b></summary>
-
-<br>
+<b>Supported fields &amp; what's not</b>
 
 | Field | Notes |
 | --- | --- |
@@ -111,9 +108,20 @@ IcontainU supports a **practical subset** of the Compose spec. Anything unsuppor
 
 Plus `${VAR}` / `.env` interpolation at parse time.
 
-**Not supported:** `build:` · `restart:` · `deploy.replicas` / scale · `env_file` · `profiles` · `secrets` · `configs` · `extends` · YAML anchors · advanced `driver_opts`. Stacks that require them (e.g. the TLS Elastic stack) parse and preview, but can't be brought up as‑is.
+**Not supported:**
 
-</details>
+| Field | Notes |
+| --- | --- |
+| `build:` | — |
+| `restart:` | — |
+| `deploy.replicas` / scale | — |
+| `env_file` | — |
+| `profiles` | — |
+| `secrets` | — |
+| `configs` | — |
+| `extends` | — |
+| YAML anchors | — |
+| advanced `driver_opts` | — |
 
 <details>
 <summary><b>Project isolation &amp; multi‑network</b></summary>
