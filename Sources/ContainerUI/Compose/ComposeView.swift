@@ -142,10 +142,12 @@ struct ComposeView: View {
                     ForEach(model.projects) { project in
                         ComposeProjectCard(
                             project: project,
-                            isBusy: model.busyProjects.contains(project.name),
-                            isUpping: model.uppingProject == project.name,
+                            isActive: model.busyProjects.contains(project.name)
+                                || model.uppingProject == project.name,
                             hostsDegraded: model.hostsDegraded.contains(project.name),
                             onUp: { up(project) },
+                            onStart: { Task { await model.start(project: project.name) } },
+                            onStop: { Task { await model.stop(project: project.name) } },
                             onDown: { pendingDown = project },
                             onRemove: { pendingRemove = project },
                             onServiceLogs: { pendingLogs = LogsTarget(id: $0) })

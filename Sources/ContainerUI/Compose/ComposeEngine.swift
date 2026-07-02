@@ -108,6 +108,31 @@ enum ComposeEngine {
         }
     }
 
+    /// Start all stopped containers belonging to `project`. Unlike `up`, this
+    /// never creates containers — it only resumes what already exists. Hosts are
+    /// re-injected by the caller's `refresh()` once IPs settle.
+    static func start(project: String) async throws {
+        let client = ContainerClient()
+        let all = try await client.list(filters: ContainerListFilters.all.withoutMachines())
+        let mine = all.filter { $0.configuration.labels[ComposeFile.projectLabel] == project }
+        for snapshot in mine where snapshot.status == .stopped {
+            log.info("starting compose container", metadata: ["id": "\(snapshot.id)"])
+            let process = try await client.bootstrap(id: snapshot.id, stdio: [nil, nil, nil])
+            try await process.start()
+        }
+    }
+
+    /// Stop all running containers belonging to `project` without deleting them.
+    static func stop(project: String) async throws {
+        let client = ContainerClient()
+        let all = try await client.list(filters: ContainerListFilters.all.withoutMachines())
+        let mine = all.filter { $0.configuration.labels[ComposeFile.projectLabel] == project }
+        for snapshot in mine where snapshot.status == .running {
+            log.info("stopping compose container", metadata: ["id": "\(snapshot.id)"])
+            try await client.stop(id: snapshot.id)
+        }
+    }
+
     /// Collect service→IP mappings across all running containers and inject them
     /// into each project container's `/etc/hosts`. Returns the set of project names
     /// with at least one container that couldn't be written (degraded discovery).

@@ -29,9 +29,10 @@ struct ComposeProjectView: Identifiable {
     var id: String { name }
 
     var runningCount: Int { services.filter { $0.status == .running }.count }
+    var stoppedCount: Int { services.filter { $0.status == .stopped }.count }
     var totalCount: Int { services.count }
-    /// A project with no running containers — fully down (or never upped).
-    var isDown: Bool { runningCount == 0 }
+    /// A project with no running or stopped containers — fully down (or never upped).
+    var isDown: Bool { runningCount == 0 && stoppedCount == 0 }
 }
 
 @Observable
@@ -335,6 +336,34 @@ final class ComposeModel {
         } catch {
             guard !error.isCancellation else { return }
             lastError = .from("Failed to bring down \"\(name)\"", error: error)
+        }
+    }
+
+    /// Start all stopped containers in a project without creating new ones.
+    func start(project name: String) async {
+        lastError = nil
+        busyProjects.insert(name)
+        defer { busyProjects.remove(name) }
+        do {
+            try await ComposeEngine.start(project: name)
+            await refresh()
+        } catch {
+            guard !error.isCancellation else { return }
+            lastError = .from("Failed to start \"\(name)\"", error: error)
+        }
+    }
+
+    /// Stop all running containers in a project without deleting them.
+    func stop(project name: String) async {
+        lastError = nil
+        busyProjects.insert(name)
+        defer { busyProjects.remove(name) }
+        do {
+            try await ComposeEngine.stop(project: name)
+            await refresh()
+        } catch {
+            guard !error.isCancellation else { return }
+            lastError = .from("Failed to stop \"\(name)\"", error: error)
         }
     }
 

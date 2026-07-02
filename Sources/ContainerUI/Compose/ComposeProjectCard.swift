@@ -2,16 +2,19 @@ import ContainerResource
 import SwiftUI
 
 /// A card for one compose project: its services with per-service status, plus
-/// Up / Down / Remove controls. Mirrors the neutral-surface card style used by
-/// NetworkCard / ContainerCard.
+/// Up / Start / Stop / Down / Remove controls. The actions share one bordered,
+/// uniform-width button style with a semantic-colored icon, keeping the row
+/// visually consistent with the app's other cards.
 struct ComposeProjectCard: View {
     let project: ComposeProjectView
-    let isBusy: Bool
-    let isUpping: Bool
+    /// True when any operation (Up, Start, Stop, Down) is running on this project.
+    let isActive: Bool
     /// True when some container in this project couldn't receive its `/etc/hosts`
     /// service-discovery block (e.g. an image without `/bin/sh`).
     let hostsDegraded: Bool
     let onUp: () -> Void
+    let onStart: () -> Void
+    let onStop: () -> Void
     let onDown: () -> Void
     let onRemove: () -> Void
     /// Open a service's logs (passes the backing container id).
@@ -69,6 +72,10 @@ struct ComposeProjectCard: View {
                         + "name might not resolve.")
             }
             Spacer(minLength: 0)
+            if isActive {
+                ProgressView()
+                    .controlSize(.small)
+            }
             Text("\(project.runningCount)/\(project.totalCount)")
                 .font(.caption.weight(.medium).monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -114,43 +121,54 @@ struct ComposeProjectCard: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Spacer()
-            if isUpping {
-                ProgressView().controlSize(.small)
-            }
-            // Up: enabled for stored projects that aren't fully running.
             if project.isStored {
-                Button(action: onUp) {
-                    Label("Up", systemImage: "play.fill")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(Palette.compose)
-                .disabled(isBusy || isUpping)
-                .help("Create and start the project's services")
+                actionButton(
+                    "Up", icon: "arrow.up.circle.fill", tint: .green,
+                    help: "Create and start all services",
+                    disabled: isActive, action: onUp)
             }
-            Button(action: onDown) {
-                Label("Down", systemImage: "stop.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isBusy || isUpping || project.isDown)
-            .help("Stop and delete the project's containers")
-
+            actionButton(
+                "Start", icon: "play.fill", tint: .green,
+                help: "Start stopped containers",
+                disabled: isActive || project.stoppedCount == 0, action: onStart)
+            actionButton(
+                "Stop", icon: "stop.fill", tint: .orange,
+                help: "Stop running containers without deleting them",
+                disabled: isActive || project.runningCount == 0, action: onStop)
+            actionButton(
+                "Down", icon: "arrow.down.circle.fill", tint: .red,
+                help: "Stop and delete all containers",
+                disabled: isActive || project.isDown, action: onDown)
             if project.isStored {
-                Button(role: .destructive, action: onRemove) {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .frame(width: 26, height: 16)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.red)
-                .disabled(isBusy || isUpping)
-                .help("Remove the project and all its resources")
+                actionButton(
+                    "Remove", icon: "trash", tint: .red,
+                    help: "Remove the project and all its resources",
+                    disabled: isActive, action: onRemove)
             }
         }
         .padding(.top, 2)
+    }
+
+    /// One project action: a `.bordered` button with a semantic-colored icon and
+    /// neutral label, given a uniform minimum width so the row reads as one set.
+    /// Matches the neutral-surface + tinted-icon language used across the app's cards.
+    private func actionButton(
+        _ title: String, icon: String, tint: Color, help: String,
+        disabled: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: icon).foregroundStyle(tint)
+            }
+            .font(.caption)
+            .frame(minWidth: 52)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(disabled)
+        .help(help)
     }
 }
