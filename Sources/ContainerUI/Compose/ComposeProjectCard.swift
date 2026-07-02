@@ -119,56 +119,92 @@ struct ComposeProjectCard: View {
     }
 
     private var actions: some View {
+        // Five buttons (Up/Start/Stop/Down/Remove) don't fit a two-column grid at
+        // the default window width if each carries an icon *and* a text label. Let
+        // the layout engine decide per-card: show icon + label when the card is
+        // wide enough, otherwise fall back to icon-only (labels move to tooltips).
+        ViewThatFits(in: .horizontal) {
+            actionRow(showTitles: true)
+            actionRow(showTitles: false)
+        }
+        .padding(.top, 2)
+    }
+
+    private func actionRow(showTitles: Bool) -> some View {
         HStack(spacing: 8) {
             Spacer()
             if project.isStored {
                 actionButton(
-                    "Up", icon: "arrow.up.circle.fill", tint: .green,
-                    help: "Create and start all services",
+                    "Up", icon: "arrowtriangle.up.fill", tint: .green,
+                    help: "Up",
+                    showTitle: showTitles,
                     disabled: isActive, action: onUp)
             }
             actionButton(
                 "Start", icon: "play.fill", tint: .green,
-                help: "Start stopped containers",
+                help: "Start",
+                showTitle: showTitles,
                 disabled: isActive || project.stoppedCount == 0, action: onStart)
             actionButton(
                 "Stop", icon: "stop.fill", tint: .orange,
-                help: "Stop running containers without deleting them",
+                help: "Stop",
+                showTitle: showTitles,
                 disabled: isActive || project.runningCount == 0, action: onStop)
             actionButton(
-                "Down", icon: "arrow.down.circle.fill", tint: .red,
-                help: "Stop and delete all containers",
+                "Down", icon: "arrowtriangle.down.fill", tint: .red,
+                help: "Down",
+                showTitle: showTitles,
                 disabled: isActive || project.isDown, action: onDown)
             if project.isStored {
                 actionButton(
                     "Remove", icon: "trash", tint: .red,
-                    help: "Remove the project and all its resources",
+                    help: "Remove",
+                    showTitle: showTitles,
                     disabled: isActive, action: onRemove)
             }
         }
-        .padding(.top, 2)
     }
 
     /// One project action: a `.bordered` button with a semantic-colored icon and
     /// neutral label, given a uniform minimum width so the row reads as one set.
     /// Matches the neutral-surface + tinted-icon language used across the app's cards.
+    /// When `showTitle` is false the label collapses to icon-only (used by
+    /// `ViewThatFits` when the card is too narrow for full labels).
+    @ViewBuilder
     private func actionButton(
         _ title: String, icon: String, tint: Color, help: String,
-        disabled: Bool, action: @escaping () -> Void
+        showTitle: Bool, disabled: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label {
-                Text(title)
-            } icon: {
-                Image(systemName: icon).foregroundStyle(tint)
-            }
-            .font(.caption)
-            .frame(minWidth: 52)
-            .fixedSize(horizontal: true, vertical: false)
+            label(title, icon: icon, tint: tint, showTitle: showTitle, disabled: disabled)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
         .disabled(disabled)
         .help(help)
+    }
+
+    @ViewBuilder
+    private func label(_ title: String, icon: String, tint: Color, showTitle: Bool, disabled: Bool) -> some View {
+        let base = Label {
+            Text(title)
+        } icon: {
+            // A displayed tint color isn't dimmed by `.disabled()`, so a disabled
+            // icon-only button would still look enabled. Gray the icon ourselves.
+            Image(systemName: icon).foregroundStyle(disabled ? Color.secondary : tint)
+        }
+        .font(.caption)
+        if showTitle {
+            base.labelStyle(.titleAndIcon)
+                .frame(minWidth: 52)
+                .fixedSize(horizontal: true, vertical: false)
+        } else {
+            // Icon-only buttons are cramped at caption size; give them a larger
+            // glyph and a comfortable tap target so they don't read as tiny.
+            base.labelStyle(.iconOnly)
+                .imageScale(.large)
+                .frame(minWidth: 34)
+                .fixedSize(horizontal: true, vertical: false)
+        }
     }
 }
