@@ -123,38 +123,23 @@ Plus `${VAR}` / `.env` interpolation at parse time.
 | YAML anchors | — |
 | advanced `driver_opts` | — |
 
-<details>
-<summary><b>Project isolation &amp; multi‑network</b></summary>
-
-<br>
+<b>Project isolation &amp; multi‑network</b>
 
 - **Every project is namespaced.** Containers, volumes and networks are prefixed with the project name, so two projects that each declare a `db` service run side by side. Pinning the **same** `container_name:` in two projects fails loudly instead of hijacking.
 - **Multi‑network is fully supported.** A service on several networks resolves each peer on a network the two containers actually share.
 
-</details>
-
-<details>
-<summary><b>Healthcheck gating</b> — how <code>service_healthy</code> is honored</summary>
-
-<br>
+<b>Healthcheck gating</b> — how <code>service_healthy</code> is honored
 
 Apple `container` 1.0.0 has no native healthcheck, so IcontainU runs the probe via `container exec` **during Up** to gate `depends_on: { condition: service_healthy }`. There is no always‑on healthy/unhealthy badge.
 
 - If a gated dependency never becomes healthy, Up fails but the dependency is left running so its logs explain why — fix the compose file and re‑Up.
 - A `service_healthy` dependency with **no** healthcheck warns and is treated as start‑order only.
 
-</details>
-
-<details>
-<summary><b>Runtime constraints</b> — Apple <code>container</code> on macOS 26 (not IcontainU bugs)</summary>
-
-<br>
+<b>Runtime constraints</b> — Apple <code>container</code> on macOS 26 (not IcontainU bugs)
 
 - **Container‑to‑container DNS is broken on macOS 26 — IcontainU works around it** by injecting `<service> → real IP` into each container's `/etc/hosts` after Up.
 - **Use a named volume for database data dirs.** A macOS host bind refuses `chown`, so images that `chown` their data dir (mysql, postgres) fail on a bind mount; named volumes work.
 - **Non‑root images need `user: "0"` on a named volume**, otherwise they can't write their data dir.
-
-</details>
 
 ## License & acknowledgements
 
