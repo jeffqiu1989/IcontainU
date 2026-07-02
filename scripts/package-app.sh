@@ -10,7 +10,7 @@ set -euo pipefail
 APP_NAME="IcontainU"
 EXECUTABLE="IcontainU"
 BUNDLE_ID="com.35ers.IcontainU"
-VERSION="0.1.0"
+VERSION="0.2.0"
 MIN_MACOS="26.0"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
