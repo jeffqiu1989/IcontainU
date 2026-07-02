@@ -6,10 +6,21 @@ struct ComposeView: View {
     @State private var pendingDown: ComposeProjectView?
     @State private var pendingRemove: ComposeProjectView?
     @State private var pendingLogs: LogsTarget?
+    @State private var searchText = ""
     @State private var copyToast = false
 
     /// Identifiable wrapper so the logs sheet can bind via `.sheet(item:)`.
     private struct LogsTarget: Identifiable { let id: String }
+
+    /// Projects matching the search query — by project name or any service name.
+    private var filteredProjects: [ComposeProjectView] {
+        guard !searchText.isEmpty else { return model.projects }
+        let query = searchText.lowercased()
+        return model.projects.filter { project in
+            project.name.lowercased().contains(query)
+                || project.services.contains { $0.service.lowercased().contains(query) }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +42,7 @@ struct ComposeView: View {
         .overlay(alignment: .top) {
             if copyToast { copyToastView }
         }
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search projects")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -129,6 +141,9 @@ struct ComposeView: View {
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
             }
+        } else if filteredProjects.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+                .frame(maxHeight: .infinity, alignment: .top)
         } else {
             ScrollView {
                 LazyVGrid(
@@ -139,7 +154,7 @@ struct ComposeView: View {
                     alignment: .leading,
                     spacing: 14
                 ) {
-                    ForEach(model.projects) { project in
+                    ForEach(filteredProjects) { project in
                         ComposeProjectCard(
                             project: project,
                             isActive: model.busyProjects.contains(project.name)
