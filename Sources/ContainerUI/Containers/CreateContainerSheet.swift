@@ -20,6 +20,7 @@ struct CreateContainerSheet: View {
     /// Pull / analyze error surfaced as an alert inside this sheet so it's not
     /// hidden behind the modal (the model's banner lives in ContainersView).
     @State private var pullError: OperationError?
+    @State private var bindPathError: String?
 
     /// Backs image autocomplete, local/remote detection, pull and analysis.
     let model: ContainersModel
@@ -90,6 +91,22 @@ struct CreateContainerSheet: View {
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
             Button("Create") {
+                // Ensure bind-mount host directories exist before creating.
+                // On failure, show an alert so the user can fix the path and retry.
+                let fm = FileManager.default
+                for row in form.mounts where row.kind == .bind {
+                    let path = row.bindPath.trimmingCharacters(in: .whitespaces)
+                    guard !path.isEmpty else { continue }
+                    let resolved = path.hasPrefix("~")
+                        ? (path as NSString).expandingTildeInPath
+                        : path
+                    do {
+                        try fm.createDirectory(atPath: resolved, withIntermediateDirectories: true)
+                    } catch {
+                        bindPathError = "Cannot create bind-mount directory \"\(resolved)\": \(error.localizedDescription)"
+                        return
+                    }
+                }
                 onCreate(form.makeSpec(builtinNetworkName: networks.first { $0.isBuiltin }?.name))
                 dismiss()
             }
@@ -109,6 +126,17 @@ struct CreateContainerSheet: View {
             }
         } message: { error in
             Text(error.detail)
+        }
+        .alert(
+            "Bind Mount Error",
+            isPresented: Binding(
+                get: { bindPathError != nil },
+                set: { if !$0 { bindPathError = nil } }),
+            presenting: bindPathError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
         }
     }
 
