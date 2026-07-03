@@ -138,7 +138,36 @@ Apple `container` 1.0.0 has no native healthcheck, so IcontainU runs the probe v
 <b>Runtime constraints</b> — Apple <code>container</code> on macOS 26 (not IcontainU bugs)
 
 - **Container‑to‑container DNS is broken on macOS 26 — IcontainU works around it** by injecting `<service> → real IP` into each container's `/etc/hosts` after Up.
-- **Use a named volume for database data dirs.** A macOS host bind refuses `chown`, so images that `chown` their data dir (mysql, postgres) fail on a bind mount; named volumes work.
+- **Database data dirs on bind mounts — the chown problem and how to fix it.**
+
+  On macOS, the bind-mount root is owned by the host user and refuses `chown`. Images that `chown` their data directory at startup fail with "Operation not permitted" when the data directory *is* the mount-point root:
+
+  ```
+  # MySQL / MariaDB
+  chown: changing ownership of '/var/lib/mysql/': Operation not permitted
+
+  # PostgreSQL ≤17
+  chmod: changing permissions of '/var/lib/postgresql/data': Operation not permitted
+  chown: changing ownership of '/var/lib/postgresql/data': Operation not permitted
+  ```
+
+  **Affected versions:**
+  - **PostgreSQL 17 and below** — `PGDATA` defaults to `/var/lib/postgresql/data`, which is the mount-point root → fails.
+  - **PostgreSQL 18+** — `PGDATA` defaults to a subdirectory (`/var/lib/postgresql/18/docker`) → no issue, works out of the box.
+  - **MySQL / MariaDB** — all versions are affected.
+
+  **Fix:** point the data directory at a *subdirectory* of the mount instead. The image-specific setting that controls this differs per image:
+
+  | Image | Fix | Example compose snippet |
+  | --- | --- | --- |
+  | PostgreSQL ≤17 | Set `PGDATA` to a subdirectory | `environment: PGDATA: /var/lib/postgresql/data/pgdata` |
+  | MySQL / MariaDB | Pass `--datadir` pointing to a subdirectory | `command: ["--datadir", "/var/lib/mysql/data"]` |
+
+  Ready-to-use templates with the fix pre-applied are in [`samples/`](samples/):
+  - [`template-postgres-17.yaml`](samples/template-postgres-17.yaml) — PostgreSQL 17 with bind-mounted data dir
+  - [`template-mysql.yaml`](samples/template-mysql.yaml) — MySQL 8 with bind-mounted data dir
+
+  Import via **Compose → New Project**, edit the password and host path, then Up.
 - **Non‑root images need `user: "0"` on a named volume**, otherwise they can't write their data dir.
 
 ## License & acknowledgements

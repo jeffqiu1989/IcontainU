@@ -91,10 +91,7 @@ swift build && swift run IcontainU
 
 IcontainU 支持 Compose 规范的一个**实用子集**。任何不支持的内容都会在导入时以警告横幅提示 —— **绝不静默丢弃**。
 
-<details>
-<summary><b>支持的字段与不支持项</b></summary>
-
-<br>
+<b>支持的字段与不支持项</b>
 
 | 字段 | 说明 |
 | --- | --- |
@@ -113,40 +110,52 @@ IcontainU 支持 Compose 规范的一个**实用子集**。任何不支持的内
 
 **不支持：** `build:` · `restart:` · `deploy.replicas` / scale · `env_file` · `profiles` · `secrets` · `configs` · `extends` · YAML anchor · 高级 `driver_opts`。需要它们的栈（如带 TLS 的 Elastic 全家桶）可解析和预览，但无法原样 Up。
 
-</details>
-
-<details>
-<summary><b>项目隔离与多网络</b></summary>
-
-<br>
+<b>项目隔离与多网络</b>
 
 - **每个项目都有命名空间。** 容器、卷、网络都以项目名为前缀，因此两个都声明 `db` 服务的项目可并存运行。在两个项目里钉相同的 `container_name:` 会明确报错，而非互相劫持。
 - **完整支持多网络。** 处于多个网络的服务，会在双方实际共享的网络上解析到正确的对端 IP。
 
-</details>
-
-<details>
-<summary><b>健康检查门控</b> —— <code>service_healthy</code> 如何生效</summary>
-
-<br>
+<b>健康检查门控</b> —— <code>service_healthy</code> 如何生效
 
 Apple `container` 1.0.0 没有原生健康检查，因此 IcontainU 在 **Up 期间**通过 `container exec` 执行探针，用于门控 `depends_on: { condition: service_healthy }`。没有常驻的 healthy/unhealthy 角标。
 
 - 若被门控的依赖始终不健康，Up 失败，但该依赖容器会保留运行以便查看日志 —— 修正 compose 文件后重新 Up。
 - 声明了 `service_healthy` 但**没有** healthcheck 的依赖，会以警告提示并退化为仅启动顺序。
 
-</details>
-
-<details>
-<summary><b>运行时限制</b> —— Apple <code>container</code> 在 macOS 26 上的行为（非 IcontainU 的 bug）</summary>
-
-<br>
+<b>运行时限制</b> —— Apple <code>container</code> 在 macOS 26 上的行为（非 IcontainU 的 bug）
 
 - **容器间 DNS 在 macOS 26 上是坏的 —— IcontainU 已绕过**：Up 后把 `<服务名 → 真实 IP>` 注入每个容器的 `/etc/hosts`。
-- **数据库数据目录请用命名卷。** macOS 主机 bind 拒绝 `chown`，因此需 `chown` 数据目录的镜像（mysql、postgres）在 bind 挂载上会启动失败；命名卷可用。
-- **非 root 镜像在命名卷上需设 `user: "0"`**，否则写不了自己的数据目录。
+- **数据库数据目录与 bind 挂载 — chown 问题及修复。**
 
-</details>
+  macOS 上 bind 挂载的根目录归宿主用户所有，不允许 `chown`。启动时需要对数据目录执行 `chown` 的镜像在数据目录恰好是挂载点根目录时会报错：
+
+  ```
+  # MySQL / MariaDB
+  chown: changing ownership of '/var/lib/mysql/': Operation not permitted
+
+  # PostgreSQL ≤17
+  chmod: changing permissions of '/var/lib/postgresql/data': Operation not permitted
+  chown: changing ownership of '/var/lib/postgresql/data': Operation not permitted
+  ```
+
+  **受影响版本：**
+  - **PostgreSQL 17 及以下** — `PGDATA` 默认为 `/var/lib/postgresql/data`，即挂载点根目录 → 失败。
+  - **PostgreSQL 18+** — `PGDATA` 默认指向子目录（`/var/lib/postgresql/18/docker`）→ 无此问题，开箱即用。
+  - **MySQL / MariaDB** — 所有版本均受影响。
+
+  **修复：** 将数据目录指向挂载点的**子目录**。不同镜像的控制方式不同：
+
+  | 镜像 | 修复方式 | Compose 片段示例 |
+  | --- | --- | --- |
+  | PostgreSQL ≤17 | 设置 `PGDATA` 指向子目录 | `environment: PGDATA: /var/lib/postgresql/data/pgdata` |
+  | MySQL / MariaDB | 传 `--datadir` 指向子目录 | `command: ["--datadir", "/var/lib/mysql/data"]` |
+
+  已内置修复的模板在 [`samples/`](samples/) 目录：
+  - [`template-postgres-17.yaml`](samples/template-postgres-17.yaml) — PostgreSQL 17，bind 挂载数据目录
+  - [`template-mysql.yaml`](samples/template-mysql.yaml) — MySQL 8，bind 挂载数据目录
+
+  通过 **Compose → New Project** 导入，修改密码和宿主机路径后 Up 即可。
+- **非 root 镜像在命名卷上需设 `user: "0"`**，否则写不了自己的数据目录。
 
 ## 许可证与致谢
 
