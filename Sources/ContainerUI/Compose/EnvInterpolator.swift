@@ -50,12 +50,14 @@ enum EnvInterpolator {
 
     // MARK: - Entry points
 
-    /// Load `.env` from `baseDirectory` and interpolate `yaml` against it.
-    /// A nil `baseDirectory` (or missing `.env`) yields an empty variable table —
-    /// every `${VAR}` then substitutes empty (with a warning) unless it carries a
-    /// default, and `${VAR:?}` throws.
+    /// Host environment as base; `.env` overrides. This matches docker compose's
+    /// behaviour where `${PWD}` resolves from the shell even without a `.env` entry.
     static func interpolate(yaml: String, baseDirectory: URL?) throws -> Result {
-        try interpolate(yaml, variables: loadDotEnv(baseDirectory: baseDirectory))
+        var variables = ProcessInfo.processInfo.environment
+        for (key, value) in loadDotEnv(baseDirectory: baseDirectory) {
+            variables[key] = value
+        }
+        return try interpolate(yaml, variables: variables)
     }
 
     // MARK: - .env loading

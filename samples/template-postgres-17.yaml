@@ -1,0 +1,24 @@
+# PostgreSQL 17 — Single-service Compose template
+# Bind-mounts a data directory; PGDATA points to a subdirectory to avoid
+# the macOS bind-mount chown failure at the mount-point root.
+# Edit POSTGRES_PASSWORD and the host path before bringing up.
+#
+# Usage: Compose → New Project → paste this file → Analyze → Up
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: postgres
+    # PGDATA must be a subdirectory of the bind mount; otherwise the entrypoint
+    # chown on the mount-point root fails on macOS (operation not permitted).
+    environment:
+      POSTGRES_PASSWORD: postgres        # Superuser password (required)
+      POSTGRES_USER: ""                  # Superuser name, defaults to "postgres"
+      POSTGRES_DB: ""                    # Database created on first init, defaults to POSTGRES_USER
+      POSTGRES_INITDB_ARGS: ""           # Extra arguments passed to initdb
+      POSTGRES_INITDB_WALDIR: ""         # WAL log directory
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - ${PWD}/pg-data:/var/lib/postgresql/data

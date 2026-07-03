@@ -1,0 +1,27 @@
+# MySQL 8 — Single-service Compose template
+# Bind-mounts a data directory; --datadir points to a subdirectory to avoid
+# the macOS bind-mount chown failure at the mount-point root.
+# Edit MYSQL_ROOT_PASSWORD and the host path before bringing up.
+#
+# Usage: Compose → New Project → paste this file → Analyze → Up
+
+services:
+  mysql:
+    image: mysql:8
+    container_name: mysql
+    # --datadir must be a subdirectory of the bind mount; otherwise the
+    # entrypoint chown on the mount-point root fails on macOS (operation not permitted).
+    command: ["--datadir", "/var/lib/mysql/data", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql           # Root password (required — pick one of the three methods)
+      MYSQL_DATABASE: ""                   # Database created on first init
+      MYSQL_USER: ""                       # User created on first init
+      MYSQL_PASSWORD: ""                   # Password for MYSQL_USER (requires MYSQL_USER)
+      MYSQL_ALLOW_EMPTY_PASSWORD: ""       # Set to "yes" to allow empty root password (not recommended)
+      MYSQL_RANDOM_ROOT_PASSWORD: ""       # Set to "yes" to generate a random root password
+      MYSQL_ONETIME_PASSWORD: ""           # Set to "yes" to expire root password after first login
+      MYSQL_INITDB_SKIP_TZINFO: ""         # Set to "yes" to skip timezone initialization
+    ports:
+      - "3306:3306"
+    volumes:
+      - ${PWD}/mysql-data:/var/lib/mysql

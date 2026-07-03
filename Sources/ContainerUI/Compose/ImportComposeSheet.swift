@@ -17,6 +17,7 @@ struct ImportComposeSheet: View {
     @State private var formState = ComposeImportFormState()
     @State private var originalFile: ComposeFile?
     @State private var analyzeError: String?
+    @State private var bindPathError: String?
 
     /// Volumes referenced across all services (for the volume picker). The form
     /// stores each mount's source as the raw, unprefixed YAML volume name (e.g.
@@ -86,6 +87,17 @@ struct ImportComposeSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.compose)
                 .disabled(!canUp)
+        }
+        .alert(
+            "Bind Mount Error",
+            isPresented: Binding(
+                get: { bindPathError != nil },
+                set: { if !$0 { bindPathError = nil } }),
+            presenting: bindPathError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
         }
     }
 
@@ -259,6 +271,22 @@ struct ImportComposeSheet: View {
         let name = projectName.trimmingCharacters(in: .whitespaces)
         do {
             let parse = try formState.makeParseResult(baseDirectory: baseDirectory)
+            // Ensure bind-mount host directories exist. Apple's containerization
+            // does not create them automatically; on failure, show the error
+            // inline so the user can fix the YAML and retry without re-importing.
+            let fm = FileManager.default
+            for spec in parse.specs.values {
+                for vol in spec.volumes {
+                    guard let source = vol.split(separator: ":").first.map(String.init),
+                          source.hasPrefix("/") else { continue }
+                    do {
+                        try fm.createDirectory(atPath: source, withIntermediateDirectories: true)
+                    } catch {
+                        bindPathError = "Cannot create bind-mount directory \"\(source)\": \(error.localizedDescription)"
+                        return
+                    }
+                }
+            }
             let overrides = originalFile.map { formState.buildServiceOverrides(from: $0) } ?? [:]
             let record = ComposeProjectRecord(
                 name: name,
