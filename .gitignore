@@ -11,3 +11,4 @@ DerivedData/
 .claude/
 /IcontainU.app
 *.zip
+.mcp.json

@@ -54,6 +54,8 @@ struct RootView: View {
             SystemView()
         case .registries:
             RegistriesView()
+        case .mcp:
+            MCPView()
         }
     }
 }

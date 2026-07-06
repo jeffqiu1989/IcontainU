@@ -15,6 +15,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     // REGISTRY
     case registries
     // bottom
+    case mcp
     case system
 
     var id: String { rawValue }
@@ -28,6 +29,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
         case .volumes: "Volumes"
         case .networks: "Networks"
         case .registries: "Registries"
+        case .mcp: "MCP"
         case .system: "System"
         }
     }
@@ -41,6 +43,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
         case .volumes: "externaldrive"
         case .networks: "network"
         case .registries: "key"
+        case .mcp: "point.3.connected.trianglepath.dotted"
         case .system: "gearshape"
         }
     }
@@ -56,6 +59,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
         case .volumes: Palette.volumes
         case .networks: Palette.networks
         case .registries: Palette.registries
+        case .mcp: .purple
         case .system: Palette.system
         }
     }
@@ -86,6 +90,7 @@ struct Sidebar: View {
                 row(.registries)
             }
             Section("System") {
+                row(.mcp)
                 row(.system)
             }
         }
