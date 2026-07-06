@@ -212,9 +212,8 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             requestState = nil
 
             nonisolated(unsafe) let ctx = context
-            nonisolated(unsafe) let self_ = self
             Task {
-                await self_.handleRequest(state: state, context: ctx)
+                await self.handleRequest(state: state, context: ctx)
             }
         }
     }
@@ -301,7 +300,6 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             }
 
             // Stream SSE events. Track the Task so channelInactive can cancel it.
-            nonisolated(unsafe) let self_ = self
             let task = Task {
                 do {
                     for try await chunk in stream {
@@ -310,7 +308,7 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                             var buffer = ctx.channel.allocator.buffer(capacity: chunk.count)
                             buffer.writeBytes(chunk)
                             ctx.writeAndFlush(
-                                self_.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
+                                self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
                         }
                     }
                 } catch {
@@ -318,7 +316,7 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 }
                 if !Task.isCancelled {
                     eventLoop.execute {
-                        ctx.writeAndFlush(self_.wrapOutboundOut(.end(nil)), promise: nil)
+                        ctx.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
                     }
                 }
             }
@@ -354,16 +352,17 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         context: ChannelHandlerContext
     ) {
         let bodyData = Data(body.utf8)
+        nonisolated(unsafe) let ctx = context
         context.eventLoop.execute {
             var head = HTTPResponseHead(version: version, status: status)
             head.headers.add(name: "Content-Type", value: "text/plain")
             head.headers.add(name: "Content-Length", value: "\(bodyData.count)")
-            context.write(self.wrapOutboundOut(.head(head)), promise: nil)
+            ctx.write(self.wrapOutboundOut(.head(head)), promise: nil)
 
-            var buffer = context.channel.allocator.buffer(capacity: bodyData.count)
+            var buffer = ctx.channel.allocator.buffer(capacity: bodyData.count)
             buffer.writeBytes(bodyData)
-            context.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
-            context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+            ctx.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
+            ctx.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
         }
     }
 }
