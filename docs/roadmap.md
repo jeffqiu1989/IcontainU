@@ -10,7 +10,7 @@
 |---|---|---|---|
 | **0.1.0** | 首个可用版本 | 容器/镜像/机器管理、智能创建、镜像加速、Compose 子集 | 已发布 |
 | **0.2.0** | Compose 兼容性增强 | env `${VAR}` 插值 + `.env`；（可选）ports/volumes 长语法 | 开发中（Phase 1a 已完成，env_file / 长语法待定） |
-| **0.3.0** | MCP server | Swift native MCP server，复用现有引擎，界面菜单启动/查看 | 待研究（Phase 3） |
+| **0.3.0** | MCP server | Swift native MCP server，复用现有引擎，界面菜单启动/查看 | 已实现 |
 
 health/restart 常驻监控（Phase 2）未定归属版本，视 0.2.0 之后的情况再排。
 
