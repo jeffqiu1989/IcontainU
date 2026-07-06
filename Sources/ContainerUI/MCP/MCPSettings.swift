@@ -2,7 +2,8 @@ import Foundation
 import Observation
 
 @Observable
-final class MCPSettings: @unchecked Sendable {
+@MainActor
+final class MCPSettings {
     var isEnabled: Bool = false
     var port: Int = MCPConstants.defaultPort
     var bindAddress: String = MCPConstants.defaultBindAddress
@@ -20,6 +21,15 @@ final class MCPSettings: @unchecked Sendable {
             self.key = key
             self.createdAt = createdAt
         }
+    }
+
+    /// On-disk shape. Defined once and used by both save() and load() so the
+    /// two can never drift.
+    private struct Persist: Codable {
+        var isEnabled: Bool
+        var port: Int
+        var bindAddress: String
+        var apiKeys: [APIKey]
     }
 
     init() {
@@ -46,12 +56,6 @@ final class MCPSettings: @unchecked Sendable {
     }
 
     func save() {
-        struct Persist: Codable {
-            var isEnabled: Bool
-            var port: Int
-            var bindAddress: String
-            var apiKeys: [APIKey]
-        }
         let persist = Persist(
             isEnabled: isEnabled,
             port: port,
@@ -70,12 +74,5 @@ final class MCPSettings: @unchecked Sendable {
         port = persist.port
         bindAddress = persist.bindAddress
         apiKeys = persist.apiKeys
-    }
-
-    private struct Persist: Codable {
-        var isEnabled: Bool
-        var port: Int
-        var bindAddress: String
-        var apiKeys: [APIKey]
     }
 }

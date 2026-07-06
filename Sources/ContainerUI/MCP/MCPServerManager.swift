@@ -16,6 +16,7 @@ final class MCPServerManager {
     let requestLog: MCPRequestLog
 
     private var channel: Channel?
+    private var group: MultiThreadedEventLoopGroup?
     private var sessionManager: MCPSessionManager?
     private var serverTask: Task<Void, Never>?
 
@@ -62,10 +63,17 @@ final class MCPServerManager {
             system: systemModel
         )
 
-        let manager = MCPSessionManager(bridge: bridge, requestLog: requestLog)
+        let manager = await MCPSessionManager.create(
+            bridge: bridge,
+            requestLog: requestLog,
+            bindAddress: settings.bindAddress
+        )
         sessionManager = manager
 
+        // Own the group so stop() can tear it down. A previous version left it as
+        // a local and leaked System.coreCount threads on every start/stop cycle.
         let group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
+        self.group = group
         let settingsRef = settings
 
         let bootstrap = ServerBootstrap(group: group)
@@ -79,7 +87,6 @@ final class MCPServerManager {
                 }
             }
             .childChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
-            .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
 
         do {
             let ch = try await bootstrap.bind(
@@ -90,17 +97,21 @@ final class MCPServerManager {
             isRunning = true
             lastError = nil
 
-            serverTask = Task {
-                do {
-                    try await ch.closeFuture.get()
-                } catch {
-                    await MainActor.run {
-                        self.isRunning = false
-                        self.lastError = error.localizedDescription
-                    }
-                }
+            // Await channel close (from stop() or external). Reset isRunning on
+            // completion either way — do NOT cancel this Task in stop(), since
+            // cancellation would surface as a spurious lastError.
+            serverTask = Task { [weak self] in
+                try? await ch.closeFuture.get()
+                await MainActor.run { self?.isRunning = false }
             }
         } catch {
+            // Bind failed — tear down the group we just created so its threads
+            // don't leak, and stop the session manager (which started its
+            // reaper Task in init) before dropping the reference.
+            await sessionManager?.stop()
+            sessionManager = nil
+            await Self.shutdownGracefully(group)
+            self.group = nil
             lastError = error.localizedDescription
             throw error
         }
@@ -108,12 +119,31 @@ final class MCPServerManager {
 
     func stop() async {
         guard isRunning else { return }
-        serverTask?.cancel()
-        serverTask = nil
+        // Close the server channel (stops accepting), then shut down the group.
+        // group.shutdownGracefully closes every child channel still attached to
+        // it, so in-flight client connections are torn down too — not just the
+        // listening socket.
         try? await channel?.close()
         channel = nil
+        if let group {
+            await Self.shutdownGracefully(group)
+            self.group = nil
+        }
+        // Tear down sessions (disconnects transports, cancels the reaper Task)
+        // before dropping the reference — otherwise the reaper would outlive the
+        // server and keep touching disconnected transports.
+        await sessionManager?.stop()
         sessionManager = nil
         isRunning = false
+        // serverTask will exit on its own once closeFuture completes; we don't
+        // need to await or cancel it.
+        serverTask = nil
+    }
+
+    private static func shutdownGracefully(_ group: EventLoopGroup) async {
+        await withCheckedContinuation { continuation in
+            group.shutdownGracefully { _ in continuation.resume() }
+        }
     }
 }
 
@@ -132,6 +162,9 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     }
 
     private var requestState: RequestState?
+    /// SSE stream Tasks spawned for this channel's responses. Cancelled when the
+    /// channel goes inactive so a dead connection stops writing.
+    private var streamTasks: [Task<Void, Never>] = []
 
     init(sessionManager: MCPSessionManager, settings: MCPSettings) {
         self.sessionManager = sessionManager
@@ -147,8 +180,25 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 head: head,
                 bodyBuffer: context.channel.allocator.buffer(capacity: 0)
             )
+
         case .body(var buffer):
+            guard let state = requestState else { return }
+            // Enforce the body size limit before accumulating — without this a
+            // malicious client could exhaust memory by streaming a huge POST.
+            let projected = state.bodyBuffer.readableBytes + buffer.readableBytes
+            if projected > MCPConstants.maxRequestBodyBytes {
+                requestState = nil
+                writeErrorResponse(
+                    status: HTTPResponseStatus(statusCode: 413),
+                    body: "Payload Too Large",
+                    version: state.head.version,
+                    context: context
+                )
+                context.close(promise: nil)
+                return
+            }
             requestState?.bodyBuffer.writeBuffer(&buffer)
+
         case .end:
             guard let state = requestState else { return }
             requestState = nil
@@ -161,6 +211,13 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
+    func channelInactive(context: ChannelHandlerContext) {
+        // Channel closed — cancel any in-flight SSE stream Tasks so they stop
+        // writing to a dead context.
+        for task in streamTasks { task.cancel() }
+        streamTasks.removeAll()
+    }
+
     private func handleRequest(state: RequestState, context: ChannelHandlerContext) async {
         let head = state.head
         let path = String(head.uri.split(separator: "?").first ?? Substring(head.uri))
@@ -170,14 +227,16 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             return
         }
 
-        // API Key authentication
+        // API Key authentication. settings is @MainActor-isolated, so hop to
+        // MainActor for the read.
         let authHeader = head.headers.first(name: "Authorization")
         guard let auth = authHeader, auth.hasPrefix("Bearer ") else {
             writeErrorResponse(status: .unauthorized, body: "Unauthorized", version: head.version, context: context)
             return
         }
         let token = String(auth.dropFirst(7))
-        guard settings.validateKey(token) else {
+        let valid = await MainActor.run { settings.validateKey(token) }
+        guard valid else {
             writeErrorResponse(status: .unauthorized, body: "Invalid API key", version: head.version, context: context)
             return
         }
@@ -233,24 +292,29 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 ctx.flush()
             }
 
-            // Stream SSE events
-            Task {
+            // Stream SSE events. Track the Task so channelInactive can cancel it.
+            nonisolated(unsafe) let self_ = self
+            let task = Task {
                 do {
                     for try await chunk in stream {
+                        if Task.isCancelled { break }
                         eventLoop.execute {
                             var buffer = ctx.channel.allocator.buffer(capacity: chunk.count)
                             buffer.writeBytes(chunk)
                             ctx.writeAndFlush(
-                                self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
+                                self_.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
                         }
                     }
                 } catch {
-                    // Stream error — close connection
+                    // Stream error — fall through to close the response.
                 }
-                eventLoop.execute {
-                    ctx.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+                if !Task.isCancelled {
+                    eventLoop.execute {
+                        ctx.writeAndFlush(self_.wrapOutboundOut(.end(nil)), promise: nil)
+                    }
                 }
             }
+            eventLoop.execute { self.streamTasks.append(task) }
 
         default:
             let bodyData = response.bodyData
