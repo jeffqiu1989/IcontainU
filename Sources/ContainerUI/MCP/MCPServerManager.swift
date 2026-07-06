@@ -20,6 +20,16 @@ final class MCPServerManager {
     private var sessionManager: MCPSessionManager?
     private var serverTask: Task<Void, Never>?
 
+    /// The in-flight lifecycle operation (start/stop), if any. `isRunning` is
+    /// flipped only after bind/teardown completes, so the `!isRunning` guard
+    /// alone can't prevent two concurrent `start()` calls from both passing it
+    /// during the await window — that race leaked an EventLoopGroup + session
+    /// reaper on every collision. Await this task at the top of every lifecycle
+    /// method to serialize them.
+    private var lifecycleTask: Task<Void, Never>?
+    /// Error captured by `performStart`, re-thrown by `start()` for `try` callers.
+    private var startError: Error?
+
     private let containersModel: ContainersModel
     private let imagesModel: ImagesModel
     private let machinesModel: MachinesModel
@@ -51,8 +61,23 @@ final class MCPServerManager {
     }
 
     func start() async throws {
+        // Serialize against any in-flight start/stop so the `!isRunning` guard
+        // (flipped only after bind completes) can't be passed twice.
+        await lifecycleTask?.value
+        lifecycleTask = nil
         guard !isRunning else { return }
 
+        startError = nil
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performStart()
+        }
+        lifecycleTask = task
+        await task.value
+        if let error = startError { throw error }
+    }
+
+    private func performStart() async {
         let bridge = MCPModelBridge(
             containers: containersModel,
             images: imagesModel,
@@ -113,12 +138,23 @@ final class MCPServerManager {
             await Self.shutdownGracefully(group)
             self.group = nil
             lastError = error.localizedDescription
-            throw error
+            startError = error
         }
     }
 
     func stop() async {
+        await lifecycleTask?.value
+        lifecycleTask = nil
         guard isRunning else { return }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performStop()
+        }
+        lifecycleTask = task
+        await task.value
+    }
+
+    private func performStop() async {
         // Close the server channel (stops accepting), then shut down the group.
         // group.shutdownGracefully closes every child channel still attached to
         // it, so in-flight client connections are torn down too — not just the
@@ -140,11 +176,17 @@ final class MCPServerManager {
         serverTask = nil
     }
 
-    /// Stop then start, so a changed port or bind address takes effect. A no-op
-    /// when not running — the new values are already picked up on the next start.
+    /// Stop then start, so a changed port or bind address takes effect. Waits for
+    /// any in-flight start/stop first, so a config change made during startup is
+    /// applied rather than silently dropped (the old `guard isRunning` bailed
+    /// because isRunning is false throughout the start window). A no-op when not
+    /// running — the new values are already picked up on the next start.
     func restart() async throws {
-        guard isRunning else { return }
-        await stop()
+        await lifecycleTask?.value
+        lifecycleTask = nil
+        if isRunning {
+            await stop()
+        }
         try await start()
     }
 

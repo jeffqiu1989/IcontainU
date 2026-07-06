@@ -349,6 +349,12 @@ final class ComposeModel {
     /// volumes so a later `down(removeNetworks:removeVolumes:)` can reclaim them
     /// (a raw record with empty `declaredNetworks/Volumes` would orphan them).
     /// Persists the record, brings the project up, and throws on failure.
+    ///
+    /// If a project with this name already exists (e.g. imported via the UI with
+    /// a base directory and service overrides), those fields are preserved — only
+    /// the YAML and declared resources are replaced. This mirrors the UI's
+    /// "Up will update it" re-import semantics and prevents silently wiping a
+    /// base directory that relative bind mounts resolve against.
     func upAndWait(record raw: ComposeProjectRecord) async throws {
         let interpolated = try EnvInterpolator.interpolate(
             yaml: raw.yaml, baseDirectory: raw.baseDirectory)
@@ -358,15 +364,18 @@ final class ComposeModel {
         }
         let parse = try file.toSpecs(project: raw.name, baseDirectory: raw.baseDirectory)
 
-        // Rebuild the record with the parsed declarations so teardown is complete.
+        // Rebuild the record with the parsed declarations so teardown is
+        // complete, preserving any existing base directory / overrides / import
+        // date so a same-name MCP up doesn't orphan relative binds or user edits.
+        let existing = store.record(for: raw.name)
         let record = ComposeProjectRecord(
             name: raw.name,
             yaml: raw.yaml,
-            baseDirectoryPath: raw.baseDirectoryPath,
+            baseDirectoryPath: existing?.baseDirectoryPath ?? raw.baseDirectoryPath,
             declaredNetworks: parse.declaredNetworks,
             declaredVolumes: parse.declaredVolumes,
-            importedAt: raw.importedAt,
-            serviceOverrides: raw.serviceOverrides)
+            importedAt: existing?.importedAt ?? raw.importedAt,
+            serviceOverrides: existing?.serviceOverrides ?? raw.serviceOverrides)
         try store.save(record)
 
         busyProjects.insert(record.name)
