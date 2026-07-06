@@ -140,6 +140,14 @@ final class MCPServerManager {
         serverTask = nil
     }
 
+    /// Stop then start, so a changed port or bind address takes effect. A no-op
+    /// when not running — the new values are already picked up on the next start.
+    func restart() async throws {
+        guard isRunning else { return }
+        await stop()
+        try await start()
+    }
+
     private static func shutdownGracefully(_ group: EventLoopGroup) async {
         await withCheckedContinuation { continuation in
             group.shutdownGracefully { _ in continuation.resume() }

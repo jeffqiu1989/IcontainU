@@ -1,30 +1,35 @@
 import SwiftUI
 
+/// Control panel for the embedded MCP server: enable/disable, bind config, API
+/// keys, and a live request log. Styled to match the app's other settings-style
+/// screens (RegistriesView) — sectioned cards on a neutral surface, no material.
 struct MCPView: View {
     @Environment(MCPServerManager.self) private var server
     @State private var showNewKeySheet = false
-    @State private var newKeyName = ""
     @State private var generatedKey: MCPSettings.APIKey?
     @State private var showGeneratedKey = false
     @State private var portText = ""
-    @State private var selectedAddress = "127.0.0.1"
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
-                serverSection
-                keysSection
-                logSection
+            VStack(alignment: .leading, spacing: 14) {
+                header
+                serverCard
+                keysCard
+                logCard
             }
-            .padding()
+            .padding(16)
         }
-        .navigationTitle("MCP Server")
-        .onAppear {
-            portText = "\(server.settings.port)"
-            selectedAddress = server.settings.bindAddress
+        .onAppear { portText = "\(server.settings.port)" }
+        .onChange(of: server.settings.port) { _, newValue in
+            // Keep the field in sync if the port changes elsewhere.
+            if Int(portText) != newValue { portText = "\(newValue)" }
         }
         .sheet(isPresented: $showNewKeySheet) {
-            newKeySheet
+            NewKeySheet { name in
+                generatedKey = server.settings.generateKey(name: name)
+                showGeneratedKey = true
+            }
         }
         .alert("API Key Generated", isPresented: $showGeneratedKey) {
             Button("Copy") {
@@ -41,204 +46,300 @@ struct MCPView: View {
         }
     }
 
-    // MARK: - Server Section
+    // MARK: - Header
 
-    @ViewBuilder
-    private var serverSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Server", systemImage: "server.rack")
-                .font(.headline)
-
-            HStack {
-                Toggle("Enable MCP Server", isOn: Binding(
-                    get: { server.settings.isEnabled },
-                    set: { newValue in
-                        server.settings.isEnabled = newValue
-                        server.settings.save()
-                        if newValue {
-                            Task { try? await server.start() }
-                        } else {
-                            Task { await server.stop() }
-                        }
-                    }
-                ))
-
-                Spacer()
-
-                if server.isRunning {
-                    Label("Running", systemImage: "circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                } else if let error = server.lastError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                }
-            }
-
-            HStack {
-                Text("Port")
-                    .frame(width: 80, alignment: .trailing)
-                TextField("3000", text: $portText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 100)
-                    .onSubmit {
-                        if let p = Int(portText), p > 0, p < 65536 {
-                            server.settings.port = p
-                            server.settings.save()
-                        }
-                    }
-
-                Spacer()
-
-                Text("Bind")
-                    .frame(width: 40, alignment: .trailing)
-                Picker("", selection: $selectedAddress) {
-                    Text("localhost (127.0.0.1)").tag("127.0.0.1")
-                    Text("all interfaces (0.0.0.0)").tag("0.0.0.0")
-                }
-                .pickerStyle(.menu)
-                .frame(width: 200)
-                .onChange(of: selectedAddress) { _, newValue in
-                    server.settings.bindAddress = newValue
-                    server.settings.save()
-                }
-            }
-            .font(.system(.body, design: .monospaced))
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("MCP Server")
+                .font(.title2.weight(.semibold))
+            Text("Exposes IcontainU's containers, images, machines, volumes, networks, and Compose projects as tools over the Model Context Protocol, so an AI client like Claude Code can drive them. Requests are authenticated with an API key.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Keys Section
+    // MARK: - Server card
+
+    private var serverCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Toggle("Enable MCP Server", isOn: Binding(
+                        get: { server.settings.isEnabled },
+                        set: { setEnabled($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .font(.callout.weight(.medium))
+
+                    Spacer()
+
+                    statusIndicator
+                }
+
+                if let error = server.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider()
+
+                HStack(spacing: 20) {
+                    field(label: "Port") {
+                        TextField("3000", text: $portText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 90)
+                            .onSubmit { commitPort() }
+                    }
+                    field(label: "Bind") {
+                        Picker("", selection: Binding(
+                            get: { server.settings.bindAddress },
+                            set: { setBindAddress($0) }
+                        )) {
+                            Text("localhost (127.0.0.1)").tag("127.0.0.1")
+                            Text("all interfaces (0.0.0.0)").tag("0.0.0.0")
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Text("Endpoint: http://\(server.settings.bindAddress):\(server.settings.port)\(MCPConstants.endpoint)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
 
     @ViewBuilder
-    private var keysSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("API Keys", systemImage: "key")
-                    .font(.headline)
-                Spacer()
-                Button("Generate Key") {
-                    newKeyName = ""
-                    showNewKeySheet = true
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+    private var statusIndicator: some View {
+        if server.isRunning {
+            HStack(spacing: 5) {
+                Circle().fill(.green).frame(width: 7, height: 7)
+                Text("Running")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
             }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(.green.opacity(0.14), in: Capsule())
+        } else {
+            HStack(spacing: 5) {
+                Circle().fill(.gray).frame(width: 7, height: 7)
+                Text("Stopped")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.gray)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(.gray.opacity(0.14), in: Capsule())
+        }
+    }
 
-            if server.settings.apiKeys.isEmpty {
-                Text("No API keys. Generate one to allow remote connections.")
+    // MARK: - Keys card
+
+    private var keysCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("API Keys", systemImage: "key.fill")
+                        .font(.callout.weight(.semibold))
+                    Spacer()
+                    Button {
+                        showNewKeySheet = true
+                    } label: {
+                        Label("Generate Key", systemImage: "plus")
+                    }
+                    .controlSize(.small)
+                }
+
+                if server.settings.apiKeys.isEmpty {
+                    Text("No API keys yet. Generate one and add it to your client's Authorization header to allow connections.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(Array(server.settings.apiKeys.enumerated()), id: \.element.id) { index, key in
+                        if index > 0 { Divider() }
+                        keyRow(key)
+                    }
+                }
+            }
+        }
+    }
+
+    private func keyRow(_ key: MCPSettings.APIKey) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(key.name)
+                    .font(.callout.weight(.medium))
+                Text("Created \(key.createdAt.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .font(.callout)
-            } else {
-                ForEach(server.settings.apiKeys) { key in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(key.name)
-                                .font(.body.weight(.medium))
-                            Text("Created \(key.createdAt.formatted(.relative(presentation: .named)))")
-                                .font(.caption)
+            }
+            Spacer(minLength: 8)
+            Text("••••" + key.key.suffix(6))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Button(role: .destructive) {
+                server.settings.deleteKey(id: key.id)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Delete key")
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Log card
+
+    private var logCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Request Log", systemImage: "list.bullet.rectangle")
+                    .font(.callout.weight(.semibold))
+
+                if server.requestLog.entries.isEmpty {
+                    Text("No requests yet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                } else {
+                    Table(server.requestLog.entries) {
+                        TableColumn("Time") { entry in
+                            Text(entry.timestamp, style: .time)
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                        .width(min: 60, ideal: 70)
+                        TableColumn("Tool") { entry in
+                            Text(entry.toolName)
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                        .width(min: 120, ideal: 160)
+                        TableColumn("Status") { entry in
+                            Label(
+                                entry.success ? "OK" : "FAIL",
+                                systemImage: entry.success ? "checkmark.circle.fill" : "xmark.circle.fill"
+                            )
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(entry.success ? .green : .red)
+                            .help(entry.success ? "OK" : "Failed")
+                        }
+                        .width(50)
+                        TableColumn("Duration") { entry in
+                            Text(String(format: "%.0f ms", entry.duration * 1000))
+                                .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Text(String(repeating: "•", count: 8) + key.key.suffix(8))
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        Button(role: .destructive) {
-                            server.settings.deleteKey(id: key.id)
-                        } label: {
-                            Image(systemName: "trash")
+                        .width(min: 60, ideal: 80)
+                        TableColumn("Error") { entry in
+                            Text(entry.errorMessage ?? "—")
+                                .font(.caption)
+                                .foregroundStyle(entry.errorMessage != nil ? .red : .secondary)
+                                .lineLimit(1)
+                                .help(entry.errorMessage ?? "")
                         }
-                        .buttonStyle(.borderless)
                     }
-                    .padding(.vertical, 4)
-                    Divider()
+                    .frame(minHeight: 160, idealHeight: 220)
                 }
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Log Section
+    // MARK: - Building blocks
 
-    @ViewBuilder
-    private var logSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Request Log", systemImage: "text.book.closed")
-                .font(.headline)
+    /// The app's standard neutral content card (matches RegistriesView).
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.gray.opacity(0.22), lineWidth: 1)
+            }
+    }
 
-            if server.requestLog.entries.isEmpty {
-                Text("No requests yet.")
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
+    private func field<Content: View>(label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    // MARK: - Actions
+
+    private func setEnabled(_ on: Bool) {
+        server.settings.isEnabled = on
+        server.settings.save()
+        Task {
+            if on {
+                try? await server.start()
             } else {
-                Table(server.requestLog.entries) {
-                    TableColumn("Time") { entry in
-                        Text(entry.timestamp, style: .time)
-                            .font(.system(.caption, design: .monospaced))
-                    }
-                    .width(min: 60, ideal: 70)
-                    TableColumn("Tool") { entry in
-                        Text(entry.toolName)
-                            .font(.system(.caption, design: .monospaced))
-                    }
-                    .width(min: 120, ideal: 160)
-                    TableColumn("Status") { entry in
-                        Label(
-                            entry.success ? "OK" : "FAIL",
-                            systemImage: entry.success ? "checkmark.circle.fill" : "xmark.circle.fill"
-                        )
-                        .foregroundStyle(entry.success ? .green : .red)
-                        .font(.caption)
-                    }
-                    .width(min: 60, ideal: 70)
-                    TableColumn("Duration") { entry in
-                        Text(String(format: "%.0fms", entry.duration * 1000))
-                            .font(.system(.caption, design: .monospaced))
-                    }
-                    .width(min: 60, ideal: 70)
-                    TableColumn("Error") { entry in
-                        Text(entry.errorMessage ?? "—")
-                            .font(.caption)
-                            .foregroundStyle(entry.errorMessage != nil ? .red : .secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(minHeight: 150, idealHeight: 200)
+                await server.stop()
             }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - New Key Sheet
-
-    @ViewBuilder
-    private var newKeySheet: some View {
-        VStack(spacing: 16) {
-            Text("Generate API Key")
-                .font(.headline)
-            TextField("Key name (e.g. 'My Claude Code')", text: $newKeyName)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Cancel") {
-                    showNewKeySheet = false
-                }
-                .keyboardShortcut(.cancelAction)
-                Button("Generate") {
-                    let name = newKeyName.isEmpty ? "API Key" : newKeyName
-                    generatedKey = server.settings.generateKey(name: name)
-                    showNewKeySheet = false
-                    showGeneratedKey = true
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(newKeyName.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
+    private func commitPort() {
+        guard let p = Int(portText), (1..<65536).contains(p) else {
+            portText = "\(server.settings.port)"  // reject: restore last good value
+            return
         }
-        .padding()
-        .frame(width: 350)
+        guard p != server.settings.port else { return }
+        server.settings.port = p
+        server.settings.save()
+        Task { try? await server.restart() }
+    }
+
+    private func setBindAddress(_ address: String) {
+        guard address != server.settings.bindAddress else { return }
+        server.settings.bindAddress = address
+        server.settings.save()
+        Task { try? await server.restart() }
+    }
+}
+
+/// Modal to name and generate a new API key. Uses the shared FormSheet scaffold
+/// so it matches every other create/add sheet in the app.
+private struct NewKeySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    let onGenerate: (String) -> Void
+
+    var body: some View {
+        FormSheet(
+            icon: "key.fill",
+            iconColor: .accentColor,
+            title: "Generate API Key",
+            subtitle: "Name it so you can tell which client is connecting."
+        ) {
+            LabeledSection(label: "Name") {
+                TextField("e.g. My Claude Code", text: $name)
+                    .textFieldStyle(.roundedBorder)
+            }
+        } footer: {
+            Button("Cancel") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+            Button("Generate") { submit() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    private func submit() {
+        onGenerate(name.trimmingCharacters(in: .whitespaces))
+        dismiss()
     }
 }
