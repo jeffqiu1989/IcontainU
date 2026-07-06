@@ -324,19 +324,56 @@ final class ComposeModel {
     /// project record is kept so it stays listed and can be re-Upped.
     func down(project name: String, removeVolumes: Bool, removeNetworks: Bool) async {
         lastError = nil
-        busyProjects.insert(name)
-        defer { busyProjects.remove(name) }
         do {
-            try await ComposeEngine.down(
-                project: name,
-                record: store.record(for: name),
-                removeVolumes: removeVolumes,
-                removeNetworks: removeNetworks)
-            await refresh()
+            try await downThrowing(project: name, removeVolumes: removeVolumes, removeNetworks: removeNetworks)
         } catch {
             guard !error.isCancellation else { return }
             lastError = .from("Failed to bring down \"\(name)\"", error: error)
         }
+    }
+
+    /// Throwing core shared with the MCP layer.
+    func downThrowing(project name: String, removeVolumes: Bool, removeNetworks: Bool) async throws {
+        busyProjects.insert(name)
+        defer { busyProjects.remove(name) }
+        try await ComposeEngine.down(
+            project: name,
+            record: store.record(for: name),
+            removeVolumes: removeVolumes,
+            removeNetworks: removeNetworks)
+        await refresh()
+    }
+
+    /// Throwing, synchronous-completion Up for the MCP layer. Parses the YAML to
+    /// build specs — which also captures the project's declared networks and
+    /// volumes so a later `down(removeNetworks:removeVolumes:)` can reclaim them
+    /// (a raw record with empty `declaredNetworks/Volumes` would orphan them).
+    /// Persists the record, brings the project up, and throws on failure.
+    func upAndWait(record raw: ComposeProjectRecord) async throws {
+        let interpolated = try EnvInterpolator.interpolate(
+            yaml: raw.yaml, baseDirectory: raw.baseDirectory)
+        var file = try ComposeParser.parse(yaml: interpolated.text)
+        if let overrides = raw.serviceOverrides, !overrides.isEmpty {
+            file = file.applyOverrides(overrides)
+        }
+        let parse = try file.toSpecs(project: raw.name, baseDirectory: raw.baseDirectory)
+
+        // Rebuild the record with the parsed declarations so teardown is complete.
+        let record = ComposeProjectRecord(
+            name: raw.name,
+            yaml: raw.yaml,
+            baseDirectoryPath: raw.baseDirectoryPath,
+            declaredNetworks: parse.declaredNetworks,
+            declaredVolumes: parse.declaredVolumes,
+            importedAt: raw.importedAt,
+            serviceOverrides: raw.serviceOverrides)
+        try store.save(record)
+
+        busyProjects.insert(record.name)
+        defer { busyProjects.remove(record.name) }
+        try await ComposeEngine.up(project: record.name, parse: parse) { _ in { _ in } }
+        lastHostsSignature = ""
+        await refresh()
     }
 
     /// Start all stopped containers in a project without creating new ones.

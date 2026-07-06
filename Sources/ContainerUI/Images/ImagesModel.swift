@@ -59,15 +59,20 @@ final class ImagesModel {
     func delete(_ image: ContainerImage) async {
         lastError = nil
         do {
-            // Delete by the full reference (e.g. docker.io/library/nginx:latest),
-            // not the shortened displayReference — the backend matches the stored
-            // canonical reference, so a denormalized name would not be found.
-            try await ClientImage.delete(reference: image.name, garbageCollect: true)
-            await refresh()
+            try await deleteThrowing(image)
         } catch {
             lastError = OperationError(
                 title: "Failed to delete image", detail: error.localizedDescription)
         }
+    }
+
+    /// Throwing core shared with the MCP layer.
+    func deleteThrowing(_ image: ContainerImage) async throws {
+        // Delete by the full reference (e.g. docker.io/library/nginx:latest),
+        // not the shortened displayReference — the backend matches the stored
+        // canonical reference, so a denormalized name would not be found.
+        try await ClientImage.delete(reference: image.name, garbageCollect: true)
+        await refresh()
     }
 
     /// The host's Linux platform (e.g. linux/arm64 on Apple silicon). Pulling and
@@ -159,6 +164,26 @@ final class ImagesModel {
             guard !error.isCancellation else { return }
             lastError = .from("Failed to pull image", error: error)
         }
+    }
+
+    /// Throwing, synchronous-completion pull for the MCP layer. Fetches and
+    /// unpacks the reference (matching the UI path) but returns the resolved
+    /// reference or throws, rather than driving the progress bar.
+    func pullAndWait(reference: String) async throws -> String {
+        let trimmed = reference.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            throw InputError("Image reference is empty")
+        }
+        let platform = currentLinuxPlatform
+        let config = try await SystemConfig.load()
+        let image = try await MirrorPull.fetch(
+            originalReference: trimmed,
+            platform: platform,
+            config: config,
+            progressUpdate: { _ in })
+        try await image.unpack(platform: platform, progressUpdate: { _ in })
+        await refresh()
+        return trimmed
     }
 }
 

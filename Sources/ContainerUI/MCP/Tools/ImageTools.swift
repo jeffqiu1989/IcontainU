@@ -49,10 +49,8 @@ enum ImageTools {
         guard let reference = arguments?["reference"]?.stringValue, !reference.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: reference", annotations: nil, _meta: nil)], isError: true)
         }
-        await MainActor.run {
-            bridge.images.startPullImage(reference: reference)
-        }
-        return .init(content: [.text(text: "Image pull started: \(reference)", annotations: nil, _meta: nil)])
+        let resolved = try await bridge.images.pullAndWait(reference: reference)
+        return .init(content: [.text(text: "Image pulled: \(resolved)", annotations: nil, _meta: nil)])
     }
 
     static func handleDelete(arguments: [String: Value]?, bridge: MCPModelBridge) async throws -> CallTool.Result {
@@ -63,7 +61,7 @@ enum ImageTools {
         guard let image = images.first(where: { $0.id == id || $0.displayReference == id }) else {
             return .init(content: [.text(text: "Image not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.images.delete(image)
+        try await bridge.images.deleteThrowing(image)
         return .init(content: [.text(text: "Image deleted: \(image.displayReference)", annotations: nil, _meta: nil)])
     }
 }

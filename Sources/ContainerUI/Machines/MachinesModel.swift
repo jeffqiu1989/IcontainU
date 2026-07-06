@@ -67,28 +67,37 @@ final class MachinesModel {
 
     func boot(_ machine: MachineSnapshot) async {
         lastError = nil
-        busyItemIDs.insert(machine.id)
-        defer { busyItemIDs.remove(machine.id) }
         do {
-            _ = try await client.boot(id: machine.id)
-            await refresh()
+            try await bootThrowing(machine)
         } catch {
             guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to start machine", detail: error.localizedDescription)
         }
     }
 
-    func stop(_ machine: MachineSnapshot) async {
-        lastError = nil
+    /// Throwing core shared with the MCP layer.
+    func bootThrowing(_ machine: MachineSnapshot) async throws {
         busyItemIDs.insert(machine.id)
         defer { busyItemIDs.remove(machine.id) }
+        _ = try await client.boot(id: machine.id)
+        await refresh()
+    }
+
+    func stop(_ machine: MachineSnapshot) async {
+        lastError = nil
         do {
-            try await client.stop(id: machine.id)
-            await refresh()
+            try await stopThrowing(machine)
         } catch {
             guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to stop machine", detail: error.localizedDescription)
         }
+    }
+
+    func stopThrowing(_ machine: MachineSnapshot) async throws {
+        busyItemIDs.insert(machine.id)
+        defer { busyItemIDs.remove(machine.id) }
+        try await client.stop(id: machine.id)
+        await refresh()
     }
 
     /// Open an interactive shell in the machine via the system Terminal.
@@ -104,15 +113,19 @@ final class MachinesModel {
 
     func delete(_ machine: MachineSnapshot) async {
         lastError = nil
-        busyItemIDs.insert(machine.id)
-        defer { busyItemIDs.remove(machine.id) }
         do {
-            try await client.delete(id: machine.id)
-            await refresh()
+            try await deleteThrowing(machine)
         } catch {
             guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to delete machine", detail: error.localizedDescription)
         }
+    }
+
+    func deleteThrowing(_ machine: MachineSnapshot) async throws {
+        busyItemIDs.insert(machine.id)
+        defer { busyItemIDs.remove(machine.id) }
+        try await client.delete(id: machine.id)
+        await refresh()
     }
 
     /// Create a machine from an image. Honors registry mirrors (with retag back to

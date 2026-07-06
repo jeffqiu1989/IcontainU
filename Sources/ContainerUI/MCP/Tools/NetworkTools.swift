@@ -53,7 +53,7 @@ enum NetworkTools {
         }
         let hostOnly = arguments?["hostOnly"]?.boolValue ?? false
         let subnet = arguments?["subnet"]?.stringValue ?? ""
-        await bridge.networks.create(name: name, hostOnly: hostOnly, subnet: subnet)
+        try await bridge.networks.createThrowing(name: name, hostOnly: hostOnly, subnet: subnet)
         return .init(content: [.text(text: "Network created: \(name)", annotations: nil, _meta: nil)])
     }
 
@@ -65,7 +65,7 @@ enum NetworkTools {
         guard let network = networks.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Network not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.networks.delete(network)
+        try await bridge.networks.deleteThrowing(network)
         return .init(content: [.text(text: "Network deleted: \(id)", annotations: nil, _meta: nil)])
     }
 }

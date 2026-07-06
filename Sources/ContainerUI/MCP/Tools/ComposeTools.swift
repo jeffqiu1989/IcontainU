@@ -67,6 +67,8 @@ enum ComposeTools {
         }
         let projectName = arguments?["projectName"]?.stringValue ?? "mcp-project"
 
+        // declaredNetworks/Volumes are left empty here — upAndWait re-parses the
+        // YAML and fills them so a later compose_down can reclaim the resources.
         let record = ComposeProjectRecord(
             name: projectName,
             yaml: yaml,
@@ -74,10 +76,8 @@ enum ComposeTools {
             declaredVolumes: [],
             importedAt: Date()
         )
-        await MainActor.run {
-            bridge.compose.startUp(record: record)
-        }
-        return .init(content: [.text(text: "Compose up started for project: \(projectName)", annotations: nil, _meta: nil)])
+        try await bridge.compose.upAndWait(record: record)
+        return .init(content: [.text(text: "Compose project '\(projectName)' is up", annotations: nil, _meta: nil)])
     }
 
     static func handleDown(arguments: [String: Value]?, bridge: MCPModelBridge) async throws -> CallTool.Result {
@@ -86,7 +86,7 @@ enum ComposeTools {
         }
         let removeVolumes = arguments?["removeVolumes"]?.boolValue ?? false
         let removeNetworks = arguments?["removeNetworks"]?.boolValue ?? false
-        await bridge.compose.down(project: projectName, removeVolumes: removeVolumes, removeNetworks: removeNetworks)
+        try await bridge.compose.downThrowing(project: projectName, removeVolumes: removeVolumes, removeNetworks: removeNetworks)
         return .init(content: [.text(text: "Compose project '\(projectName)' brought down", annotations: nil, _meta: nil)])
     }
 

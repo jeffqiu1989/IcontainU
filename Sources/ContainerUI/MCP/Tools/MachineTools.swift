@@ -66,7 +66,7 @@ enum MachineTools {
         guard let machine = machines.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Machine not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.machines.boot(machine)
+        try await bridge.machines.bootThrowing(machine)
         return .init(content: [.text(text: "Machine \(machine.id) booted", annotations: nil, _meta: nil)])
     }
 
@@ -78,7 +78,7 @@ enum MachineTools {
         guard let machine = machines.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Machine not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.machines.stop(machine)
+        try await bridge.machines.stopThrowing(machine)
         return .init(content: [.text(text: "Machine \(machine.id) stopped", annotations: nil, _meta: nil)])
     }
 
@@ -90,7 +90,7 @@ enum MachineTools {
         guard let machine = machines.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Machine not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.machines.delete(machine)
+        try await bridge.machines.deleteThrowing(machine)
         return .init(content: [.text(text: "Machine \(machine.id) deleted", annotations: nil, _meta: nil)])
     }
 }

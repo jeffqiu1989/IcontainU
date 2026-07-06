@@ -51,7 +51,7 @@ enum VolumeTools {
             return .init(content: [.text(text: "Missing required parameter: name", annotations: nil, _meta: nil)], isError: true)
         }
         let size = arguments?["size"]?.stringValue ?? ""
-        await bridge.volumes.create(name: name, size: size)
+        try await bridge.volumes.createThrowing(name: name, size: size)
         return .init(content: [.text(text: "Volume created: \(name)", annotations: nil, _meta: nil)])
     }
 
@@ -63,7 +63,7 @@ enum VolumeTools {
         guard let volume = volumes.first(where: { $0.name == name }) else {
             return .init(content: [.text(text: "Volume not found: \(name)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.volumes.delete(volume)
+        try await bridge.volumes.deleteThrowing(volume)
         return .init(content: [.text(text: "Volume deleted: \(name)", annotations: nil, _meta: nil)])
     }
 }

@@ -40,3 +40,12 @@ struct OperationError: Identifiable, Equatable {
         return OperationError(title: title, detail: error.localizedDescription)
     }
 }
+
+/// A throwable input-validation failure. `OperationError` is a UI banner model
+/// (not an `Error`), so throwing paths — the model methods shared with the MCP
+/// layer — use this instead. Its `errorDescription` is what an RPC client sees.
+struct InputError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}

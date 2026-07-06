@@ -24,12 +24,32 @@ struct MCPToolRegistry: Sendable {
             do {
                 let result = try await dispatch(name: params.name, arguments: params.arguments)
                 let duration = Date().timeIntervalSince(start)
+                // A handler that returned isError == true is a tool-level failure
+                // (bad input, not-found) — record it as unsuccessful so the log
+                // reflects reality, not just thrown errors.
+                let toolFailed = result.isError ?? false
                 await MainActor.run {
-                    requestLog.record(tool: params.name, duration: duration, success: true)
+                    requestLog.record(
+                        tool: params.name,
+                        duration: duration,
+                        success: !toolFailed,
+                        error: toolFailed ? Self.firstText(result) : nil)
                 }
                 return result
             } catch {
                 let duration = Date().timeIntervalSince(start)
+                // A cancellation (raw or wrapped by ContainerClient) is the client
+                // aborting, not a server failure — surface it as such and don't
+                // pollute the log's error stats.
+                if error.isCancellation {
+                    await MainActor.run {
+                        requestLog.record(tool: params.name, duration: duration, success: false, error: "Cancelled")
+                    }
+                    return .init(
+                        content: [.text(text: "Cancelled", annotations: nil, _meta: nil)],
+                        isError: true
+                    )
+                }
                 let errorMsg = error.localizedDescription
                 await MainActor.run {
                     requestLog.record(tool: params.name, duration: duration, success: false, error: errorMsg)
@@ -40,6 +60,14 @@ struct MCPToolRegistry: Sendable {
                 )
             }
         }
+    }
+
+    /// The first text block of a result, for logging a tool-level error message.
+    private static func firstText(_ result: CallTool.Result) -> String? {
+        for block in result.content {
+            if case .text(let text, _, _) = block { return text }
+        }
+        return nil
     }
 
     private func dispatch(name: String, arguments: [String: Value]?) async throws -> CallTool.Result {

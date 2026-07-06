@@ -89,10 +89,8 @@ enum ContainerTools {
             env: arguments?["env"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             networks: arguments?["networks"]?.arrayValue?.compactMap(\.stringValue) ?? []
         )
-        await MainActor.run {
-            bridge.containers.startCreate(spec: spec)
-        }
-        return .init(content: [.text(text: "Container creation started for image: \(image)", annotations: nil, _meta: nil)])
+        let id = try await bridge.containers.createAndWait(spec: spec)
+        return .init(content: [.text(text: "Container created: \(id)", annotations: nil, _meta: nil)])
     }
 
     static func handleStart(arguments: [String: Value]?, bridge: MCPModelBridge) async throws -> CallTool.Result {
@@ -103,7 +101,7 @@ enum ContainerTools {
         guard let container = containers.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Container not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.containers.start(container)
+        try await bridge.containers.startThrowing(container)
         return .init(content: [.text(text: "Container \(container.id) started", annotations: nil, _meta: nil)])
     }
 
@@ -115,7 +113,7 @@ enum ContainerTools {
         guard let container = containers.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Container not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.containers.stop(container)
+        try await bridge.containers.stopThrowing(container)
         return .init(content: [.text(text: "Container \(container.id) stopped", annotations: nil, _meta: nil)])
     }
 
@@ -128,7 +126,7 @@ enum ContainerTools {
         guard let container = containers.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Container not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
-        await bridge.containers.delete(container, force: force)
+        try await bridge.containers.deleteThrowing(container, force: force)
         return .init(content: [.text(text: "Container \(container.id) deleted", annotations: nil, _meta: nil)])
     }
 }

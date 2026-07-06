@@ -38,34 +38,45 @@ final class NetworksModel {
     }
 
     func create(name: String, hostOnly: Bool, subnet: String) async {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
         lastError = nil
         do {
-            // A blank subnet lets the plugin auto-allocate. A non-empty value is
-            // validated by constructing a CIDRv4, which throws on bad input — the
-            // error then surfaces in the banner instead of failing server-side.
-            let trimmedSubnet = subnet.trimmingCharacters(in: .whitespaces)
-            let ipv4Subnet = try trimmedSubnet.isEmpty ? nil : CIDRv4(trimmedSubnet)
-            let config = try NetworkConfiguration(
-                name: trimmed,
-                mode: hostOnly ? .hostOnly : .nat,
-                ipv4Subnet: ipv4Subnet,
-                plugin: Self.defaultPlugin)
-            _ = try await client.create(configuration: config)
-            await refresh()
+            try await createThrowing(name: name, hostOnly: hostOnly, subnet: subnet)
         } catch {
             lastError = OperationError(title: "Failed to create network", detail: error.localizedDescription)
         }
     }
 
+    /// Throwing core shared with the MCP layer.
+    func createThrowing(name: String, hostOnly: Bool, subnet: String) async throws {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            throw InputError("Network name is empty")
+        }
+        // A blank subnet lets the plugin auto-allocate. A non-empty value is
+        // validated by constructing a CIDRv4, which throws on bad input — the
+        // error then surfaces in the banner instead of failing server-side.
+        let trimmedSubnet = subnet.trimmingCharacters(in: .whitespaces)
+        let ipv4Subnet = try trimmedSubnet.isEmpty ? nil : CIDRv4(trimmedSubnet)
+        let config = try NetworkConfiguration(
+            name: trimmed,
+            mode: hostOnly ? .hostOnly : .nat,
+            ipv4Subnet: ipv4Subnet,
+            plugin: Self.defaultPlugin)
+        _ = try await client.create(configuration: config)
+        await refresh()
+    }
+
     func delete(_ network: NetworkResource) async {
         lastError = nil
         do {
-            try await client.delete(id: network.id)
-            await refresh()
+            try await deleteThrowing(network)
         } catch {
             lastError = OperationError(title: "Failed to delete network", detail: error.localizedDescription)
         }
+    }
+
+    func deleteThrowing(_ network: NetworkResource) async throws {
+        try await client.delete(id: network.id)
+        await refresh()
     }
 }
