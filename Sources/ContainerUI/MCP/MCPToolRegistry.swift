@@ -83,6 +83,12 @@ struct MCPToolRegistry: Sendable {
             return try await ContainerTools.handleStop(arguments: arguments, bridge: bridge)
         case "container_delete":
             return try await ContainerTools.handleDelete(arguments: arguments, bridge: bridge)
+        case "container_exec":
+            return try await ContainerTools.handleExec(arguments: arguments, bridge: bridge)
+        case "container_logs":
+            return try await ContainerTools.handleLogs(arguments: arguments, bridge: bridge)
+        case "container_inspect":
+            return try await ContainerTools.handleInspect(arguments: arguments, bridge: bridge)
         // Images
         case "image_list":
             return try await ImageTools.handleList(bridge: bridge)

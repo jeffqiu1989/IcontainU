@@ -49,3 +49,61 @@ struct InputError: LocalizedError {
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
 }
+
+/// A registry/pull error re-mapped to a clearer message. `errorDescription` is
+/// what an MCP client sees — the generic dispatch catch forwards
+/// `error.localizedDescription`, which for a `LocalizedError` is its
+/// `errorDescription` — and what the UI banner shows via `OperationError.from`'s
+/// fallback. Produced by `Error.translatedPullError` at the pull boundary.
+struct PullError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
+extension Error {
+    /// Translate a recognized image-pull error into a clearer `PullError`, or
+    /// return `self` unchanged so unrecognized errors keep their original
+    /// `localizedDescription`. Applied at the pull boundary (`MirrorPull`) so
+    /// every path — `image_pull`, `compose_up`, and the UI — sees the same
+    /// message without each call site re-translating.
+    func translatedPullError(arch: String = Arch.hostArchitecture().rawValue) -> Error {
+        let msg = localizedDescription.lowercased()
+        // Architecture / platform mismatch.
+        if msg.contains("unsupported platform") || msg.contains("no matching manifest")
+            || msg.contains("manifest not found")
+        {
+            return PullError(
+                "This image doesn't support \(arch) (Apple Silicon). "
+                + "It may only be available for amd64/x86_64. "
+                + "Try an image with linux/\(arch) support.")
+        }
+        // Mirror can't serve the image: a 401/403 with a missing Bearer challenge
+        // or "no credentials" means the mirror doesn't proxy this repository.
+        if (msg.contains("403") || msg.contains("401"))
+            && (msg.contains("bearer") || msg.contains("no credentials"))
+        {
+            let host = Self.registryHost(in: localizedDescription) ?? "the configured registry mirror"
+            return PullError(
+                "Image could not be fetched from \(host) — the mirror may not proxy this image. "
+                + "Check the image name and tag, or configure a mirror that hosts it.")
+        }
+        // 404 manifest: image or tag genuinely not found at the registry.
+        if msg.contains("404") {
+            let host = Self.registryHost(in: localizedDescription) ?? "the registry"
+            return PullError("Image not found at \(host). Check the image name and tag.")
+        }
+        return self
+    }
+
+    /// Pull the registry host out of a daemon error message, which embeds the
+    /// registry URL (e.g. "https://docker.m.daocloud.io/v2/…/manifests/6.2").
+    private static func registryHost(in message: String) -> String? {
+        guard let r = message.range(of: "https://") else { return nil }
+        let rest = message[r.upperBound...]
+        let end = rest.firstIndex(where: { $0 == "/" || $0 == " " || $0 == "\"" || $0 == ")" })
+            ?? rest.endIndex
+        let host = String(rest[..<end])
+        return host.isEmpty ? nil : host
+    }
+}

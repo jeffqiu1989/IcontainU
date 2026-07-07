@@ -230,32 +230,63 @@ enum MirrorPull {
     /// Pull the reference, then validate that the requested platform is present
     /// in the resulting image. If not, delete the local tag and throw so no
     /// 0 KB orphan remains.
+    ///
+    /// Transient network failures (connect/read timeouts, connection resets —
+    /// the mirror occasionally times out mid-pull) are retried up to 3 times
+    /// with a short backoff; a fresh attempt usually succeeds. Non-transient
+    /// failures (404, auth/403, arch mismatch) fail fast. On final failure the
+    /// error is translated to a clearer `PullError` when recognized, so every
+    /// caller — `image_pull`, `compose_up`, and the UI — gets the same message.
     private static func pullAndValidate(
         reference: String,
         platform: Platform?,
         config: ContainerSystemConfig,
         progressUpdate: ProgressUpdateHandler?
     ) async throws -> ClientImage {
-        let img = try await ClientImage.pull(
-            reference: reference,
-            platform: platform,
-            containerSystemConfig: config,
-            progressUpdate: progressUpdate)
-
-        // Verify the platform exists — ImageStore.pull stores the tag and index
-        // even when no manifest matches the requested platform.
-        if let platform {
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
             do {
-                _ = try await img.config(for: platform)
+                let img = try await ClientImage.pull(
+                    reference: reference,
+                    platform: platform,
+                    containerSystemConfig: config,
+                    progressUpdate: progressUpdate)
+
+                // Verify the platform exists — ImageStore.pull stores the tag and index
+                // even when no manifest matches the requested platform.
+                if let platform {
+                    do {
+                        _ = try await img.config(for: platform)
+                    } catch {
+                        log.debug(
+                            "pulled image missing requested platform, removing local tag",
+                            metadata: ["reference": "\(img.reference)", "platform": "\(platform)"])
+                        try? await ClientImage.delete(reference: img.reference, garbageCollect: false)
+                        throw error
+                    }
+                }
+
+                return img
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
-                log.debug(
-                    "pulled image missing requested platform, removing local tag",
-                    metadata: ["reference": "\(img.reference)", "platform": "\(platform)"])
-                try? await ClientImage.delete(reference: img.reference, garbageCollect: false)
-                throw error
+                if error.isCancellation { throw CancellationError() }
+                // Retry only transient errors, and only while attempts remain.
+                guard error.isTransientPullError, attempt < maxAttempts else {
+                    throw error.translatedPullError()
+                }
+                log.warning(
+                    "transient pull error, retrying",
+                    metadata: [
+                        "reference": "\(reference)",
+                        "attempt": "\(attempt)/\(maxAttempts)",
+                        "error": "\(error)",
+                    ])
+                try await Task.sleep(for: .seconds(2))
             }
         }
-
-        return img
+        // Unreachable: the loop returns on success or throws on every failure
+        // path. This satisfies the compiler's exhaustiveness check.
+        throw ContainerizationError(.internalError, message: "pull failed: \(reference)")
     }
 }

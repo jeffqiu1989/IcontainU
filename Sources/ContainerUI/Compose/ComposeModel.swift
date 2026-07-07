@@ -13,6 +13,11 @@ struct ComposeServiceStatus: Identifiable {
     /// The backing container's id, when one exists — used to open its logs
     /// directly from the project card. Nil when the service isn't created.
     var containerID: String?
+    /// Last captured exit code for a stopped container, when known. The
+    /// `ContainerSnapshot` carries only `RuntimeStatus` (no exit code), so this
+    /// is populated only when an Up captured the code via `ClientProcess.wait()`
+    /// — nil for containers that stopped outside a capturing Up.
+    var exitCode: Int32?
     var id: String { service }
 }
 
@@ -54,12 +59,29 @@ final class ComposeModel {
     /// Projects currently mid-down, to disable their controls.
     private(set) var busyProjects: Set<String> = []
 
+    /// Exit codes captured during a capturing Up (`compose_up` with `wait`).
+    /// Keyed by container id. The `ContainerSnapshot` carries no exit code —
+    /// only `RuntimeStatus` — so this map is the sole source of exit codes for
+    /// `compose_status`. Cleared at the start of each capturing Up; entries
+    /// persist across polls so a one-shot init container's exit code remains
+    /// visible after it stops.
+    private var capturedExitCodes: [String: Int32] = [:]
+
     /// Projects with at least one container we couldn't write `/etc/hosts` into
     /// (e.g. an image without `/bin/sh`), so service discovery may be degraded.
     /// Surfaced as a small warning badge on the project card.
     private(set) var hostsDegraded: Set<String> = []
 
     private let store = ComposeProjectStore.shared
+
+    /// The captured exit code for a service's container, reported only for a
+    /// stopped container. A running container has no exit code yet; a container
+    /// that stopped outside a capturing Up isn't in the map (the framework
+    /// retains no retroactive exit code), so this returns nil there.
+    private func exitCode(for live: (status: RuntimeStatus, id: String)?) -> Int32? {
+        guard let live, live.status == .stopped else { return nil }
+        return capturedExitCodes[live.id]
+    }
 
     func clearError() { lastError = nil }
 
@@ -97,7 +119,9 @@ final class ComposeModel {
                 let serviceNames = Self.serviceNames(from: record.yaml)
                 let live = byProject[record.name] ?? [:]
                 let services = serviceNames.map {
-                    ComposeServiceStatus(service: $0, status: live[$0]?.status, containerID: live[$0]?.id)
+                    ComposeServiceStatus(
+                        service: $0, status: live[$0]?.status,
+                        containerID: live[$0]?.id, exitCode: exitCode(for: live[$0]))
                 }
                 views.append(ComposeProjectView(name: record.name, services: services, isStored: true))
             }
@@ -105,7 +129,9 @@ final class ComposeModel {
             // Projects seen only in running containers (e.g. started via CLI).
             for (project, live) in byProject where !seen.contains(project) {
                 let services = live.keys.sorted().map {
-                    ComposeServiceStatus(service: $0, status: live[$0]?.status, containerID: live[$0]?.id)
+                    ComposeServiceStatus(
+                        service: $0, status: live[$0]?.status,
+                        containerID: live[$0]?.id, exitCode: exitCode(for: live[$0]))
                 }
                 views.append(ComposeProjectView(name: project, services: services, isStored: false))
             }
@@ -355,7 +381,18 @@ final class ComposeModel {
     /// the YAML and declared resources are replaced. This mirrors the UI's
     /// "Up will update it" re-import semantics and prevents silently wiping a
     /// base directory that relative bind mounts resolve against.
-    func upAndWait(record raw: ComposeProjectRecord) async throws {
+    /// Outcome of one service after a capturing Up's wait window.
+    struct ServiceUpOutcome: Sendable {
+        let service: String
+        /// True if the container exited within the wait window (a one-shot/init
+        /// service that finished). False means still running at window close.
+        let exited: Bool
+        /// Exit code, when it exited. Nil while still running.
+        let exitCode: Int32?
+    }
+
+    @discardableResult
+    func upAndWait(record raw: ComposeProjectRecord, waitSeconds: Int = 0) async throws -> [ServiceUpOutcome] {
         let interpolated = try EnvInterpolator.interpolate(
             yaml: raw.yaml, baseDirectory: raw.baseDirectory)
         var file = try ComposeParser.parse(yaml: interpolated.text)
@@ -380,9 +417,64 @@ final class ComposeModel {
 
         busyProjects.insert(record.name)
         defer { busyProjects.remove(record.name) }
-        try await ComposeEngine.up(project: record.name, parse: parse) { _ in { _ in } }
+        // Fresh Up — drop stale exit codes so a re-up doesn't show a prior run's.
+        capturedExitCodes = capturedExitCodes.filter { id, _ in
+            !parse.orderedServices.contains { (parse.specs[$0]?.name ?? $0) == id }
+        }
+
+        // Attach a wait() to each service the instant it starts — a one-shot can
+        // exit before Up returns, and wait() on an already-exited init process
+        // hangs, so we must catch it live. Each detached task records its exit
+        // code back onto the model; the deadline below reads whatever exited.
+        let started = StartedServiceLog()
+        let capturing = waitSeconds > 0
+
+        @Sendable func onStarted(_ s: ComposeEngine.StartedService) {
+            Task { await started.add(service: s.service, id: s.id) }
+            let id = s.id
+            let process = s.process
+            Task.detached { [weak self] in
+                guard let code = try? await process.wait() else { return }
+                await self?.recordExitCode(id: id, code: code)
+            }
+        }
+
+        _ = try await ComposeEngine.up(
+            project: record.name, parse: parse,
+            onStarted: capturing ? onStarted : nil
+        ) { _ in { _ in } }
         lastHostsSignature = ""
+
+        var outcomes: [ServiceUpOutcome] = []
+        if waitSeconds > 0 {
+            try? await Task.sleep(for: .seconds(waitSeconds))
+            let services = await started.all()
+            outcomes = services.map { entry in
+                if let code = capturedExitCodes[entry.id] {
+                    return ServiceUpOutcome(service: entry.service, exited: true, exitCode: code)
+                }
+                return ServiceUpOutcome(service: entry.service, exited: false, exitCode: nil)
+            }
+        }
         await refresh()
+        return outcomes
+    }
+
+    /// Record a container's exit code, reported by a detached wait task started
+    /// during a capturing Up. MainActor-isolated so the concurrent waits mutate
+    /// `capturedExitCodes` without a data race.
+    private func recordExitCode(id: String, code: Int32) {
+        capturedExitCodes[id] = code
+    }
+
+    /// Records which services started during a capturing Up, populated from the
+    /// `@Sendable onStarted` callback (which can fire off the main actor). An
+    /// actor so those concurrent appends don't race.
+    private actor StartedServiceLog {
+        struct Entry { let service: String; let id: String }
+        private var entries: [Entry] = []
+        func add(service: String, id: String) { entries.append(Entry(service: service, id: id)) }
+        func all() -> [Entry] { entries }
     }
 
     /// Start all stopped containers in a project without creating new ones.

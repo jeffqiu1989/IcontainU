@@ -16,20 +16,44 @@ enum ComposeEngine {
 
     private static let plugin = "container-network-vmnet"
 
+    /// A service's started process, retained so a later `wait()` can read its
+    /// exit code (which the container snapshot doesn't carry). Returned by `up`
+    /// for every service it starts this call — new creates and idempotent
+    /// restarts alike. A service left already-running (not restarted) has no
+    /// fresh process and is omitted.
+    struct StartedService: Sendable {
+        let service: String
+        let id: String
+        let process: ClientProcess
+    }
+
     /// Bring a project up. Idempotent: a service whose container already exists is
     /// started (if stopped) rather than recreated, so a second Up doesn't fail.
     ///
     /// `beginPhase` mirrors `ContainerCreateEngine.create`'s contract — it's called
     /// at each phase boundary with a label and returns the progress handler for that
     /// phase. Per-service phases are prefixed with the service name.
+    ///
+    /// Returns the processes started this call, so a caller doing `up wait` can
+    /// `wait()` on a one-shot/init service's exit and capture its code.
+    ///
+    /// `onStarted` is invoked the instant each service's process starts, BEFORE
+    /// the rest of Up (later services, the ~10s hosts-injection poll) runs. A
+    /// one-shot that exits quickly would otherwise be gone before Up returns —
+    /// and `wait()` on an already-exited container's init process hangs (a
+    /// framework quirk) — so the caller must attach its `wait()` here, while the
+    /// process is still live, not from the returned array afterward.
+    @discardableResult
     static func up(
         project: String,
         parse: ComposeParseResult,
+        onStarted: (@Sendable (StartedService) -> Void)? = nil,
         beginPhase: @escaping @Sendable (String) async -> ProgressUpdateHandler
-    ) async throws {
+    ) async throws -> [StartedService] {
         try await createNetworks(parse.declaredNetworks, project: project, beginPhase: beginPhase)
         try await createVolumes(parse.declaredVolumes, project: project, beginPhase: beginPhase)
 
+        var started: [StartedService] = []
         let client = ContainerClient()
         for service in parse.orderedServices {
             guard let spec = parse.specs[service] else { continue }
@@ -53,6 +77,9 @@ enum ComposeEngine {
                     _ = await beginPhase("\(service): starting…")
                     let process = try await client.bootstrap(id: id, stdio: [nil, nil, nil])
                     try await process.start()
+                    let s = StartedService(service: service, id: id, process: process)
+                    onStarted?(s)
+                    started.append(s)
                 }
                 continue
             }
@@ -81,9 +108,12 @@ enum ComposeEngine {
 
             try Task.checkCancellation()
             log.info("creating compose service", metadata: ["project": "\(project)", "service": "\(service)"])
-            _ = try await ContainerCreateEngine.create(spec: spec) { label in
+            let (createdID, process) = try await ContainerCreateEngine.createRetainingProcess(spec: spec) { label in
                 await beginPhase("\(service): \(label)")
             }
+            let s = StartedService(service: service, id: createdID, process: process)
+            onStarted?(s)
+            started.append(s)
         }
 
         // Wire up service discovery: the built-in DNS returns a wrong `28.0.0.x`
@@ -106,6 +136,8 @@ enum ComposeEngine {
             }
             try? await Task.sleep(for: .seconds(1))
         }
+
+        return started
     }
 
     /// Start all stopped containers belonging to `project`. Unlike `up`, this

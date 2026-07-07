@@ -26,4 +26,36 @@ extension Error {
         guard let error = self as? ContainerizationError else { return false }
         return error.code == .cancelled || (error.cause?.isCancellation ?? false)
     }
+
+    /// True for transient image-pull failures worth an automatic retry:
+    /// connect/read timeouts, connection resets. The `container` XPC clients
+    /// wrap these in a `ContainerizationError` cause chain (same wrapping that
+    /// hides cancellations), so walk the chain and string-match at each level —
+    /// the underlying `HTTPClientError` arrives as a cause whose
+    /// `String(describing:)` is e.g. `"connectTimeout"`.
+    ///
+    /// Non-transient failures (404, auth/403, arch mismatch) return false so the
+    /// pull fails fast instead of wasting attempts that can't succeed.
+    var isTransientPullError: Bool {
+        if self is CancellationError { return false }
+        return Self.anyCause(self) { $0.hasTransientPullMarker }
+    }
+
+    private static func anyCause(_ error: Error, _ test: (Error) -> Bool) -> Bool {
+        if test(error) { return true }
+        if let ce = error as? ContainerizationError, let cause = ce.cause {
+            return anyCause(cause, test)
+        }
+        return false
+    }
+
+    private var hasTransientPullMarker: Bool {
+        // `localizedDescription` folds the cause in for `ContainerizationError`
+        // ("… (cause: \"connectTimeout\")"); `String(describing:)` covers cases
+        // where the cause's description differs. Lowercased substring match.
+        let desc = (self.localizedDescription + " " + String(describing: self)).lowercased()
+        return desc.contains("connecttimeout") || desc.contains("readtimeout")
+            || desc.contains("connection reset") || desc.contains("connectionreset")
+            || desc.contains("timed out")
+    }
 }
