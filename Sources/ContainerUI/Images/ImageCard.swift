@@ -9,6 +9,8 @@ import SwiftUI
 struct ImageRepoCard: View {
     let group: ImageRepoGroup
     let onDelete: (ContainerImage) -> Void
+    let onExport: (ContainerImage) -> Void
+    var exportDisabled: Bool = false
 
     @State private var hovering = false
     @State private var expanded = false
@@ -94,7 +96,7 @@ struct ImageRepoCard: View {
     private var detailList: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(group.tags) { tag in
-                TagDetailRow(tag: tag, palette: palette, onDelete: onDelete)
+                TagDetailRow(tag: tag, palette: palette, onDelete: onDelete, onExport: onExport, exportDisabled: exportDisabled)
                 if tag.id != group.tags.last?.id {
                     Divider().opacity(0.5)
                 }
@@ -109,6 +111,8 @@ private struct TagDetailRow: View {
     let tag: ImageTagRow
     let palette: CardPalette
     let onDelete: (ContainerImage) -> Void
+    let onExport: (ContainerImage) -> Void
+    var exportDisabled: Bool = false
 
     @State private var showArches = false
 
@@ -140,6 +144,16 @@ private struct TagDetailRow: View {
                 Text(sizeText)
                     .font(.caption)
                     .foregroundStyle(Color.primary.opacity(0.7))
+                Button {
+                    onExport(tag.image)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(palette.accent)
+                .help("Export \(tag.tag)")
+                .disabled(exportDisabled)
                 Button {
                     onDelete(tag.image)
                 } label: {

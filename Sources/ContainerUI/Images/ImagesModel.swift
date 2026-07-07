@@ -21,6 +21,19 @@ final class ImagesModel {
     /// at `.claude/plans/pull-machine-wiggly-squirrel.md`.
     private var pullGeneration = 0
 
+    /// Active image export (save to tar). Indeterminate only — `ClientImage.save`
+    /// has no progress handler, unlike pull/push/unpack.
+    private(set) var export: OperationProgress?
+    private var exportTask: Task<Void, Never>?
+    private var exportGeneration = 0
+
+    /// Active image import (load from tar). Two phases: "Loading tar archive"
+    /// (indeterminate, `load` has no progress handler) then "Unpacking…" (byte
+    /// level, via each loaded image's `unpack`).
+    private(set) var importProgress: OperationProgress?
+    private var importTask: Task<Void, Never>?
+    private var importGeneration = 0
+
     func clearError() { lastError = nil }
 
     /// Images grouped by repository for the card grid — one card per repository,
@@ -158,6 +171,115 @@ final class ImagesModel {
             guard pullGeneration == generation else { return }
             guard !error.isCancellation else { return }
             lastError = .from("Failed to pull image", error: error)
+        }
+    }
+
+    // MARK: - Export (save to tar)
+
+    func cancelExport() {
+        exportGeneration &+= 1
+        exportTask?.cancel()
+        export = nil
+    }
+
+    func startExport(reference: String, outputURL: URL) {
+        cancelExport()
+        let generation = exportGeneration
+        exportTask = Task { [weak self] in
+            await self?._exportImage(reference: reference, outputURL: outputURL, generation: generation)
+        }
+    }
+
+    /// Saves a single reference as an OCI tar archive for the host platform only.
+    /// `ClientImage.save` reports no progress, so the bar stays indeterminate —
+    /// matching the CLI's `ImageSave` command. On failure or cancel the partially
+    /// written file is removed so the user isn't left with a truncated archive.
+    private func _exportImage(reference: String, outputURL: URL, generation: Int) async {
+        lastError = nil
+        let platform = currentLinuxPlatform
+
+        let progress = OperationProgress()
+        progress.beginPhase("Saving \(reference)…")
+        guard exportGeneration == generation else { return }
+        export = progress
+        defer { if exportGeneration == generation { export = nil } }
+
+        do {
+            let config = try await SystemConfig.load()
+            try Task.checkCancellation()
+            try await ClientImage.save(
+                references: [reference],
+                out: outputURL.path,
+                platform: platform,
+                containerSystemConfig: config)
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            try? FileManager.default.removeItem(at: outputURL)
+        } catch {
+            try? FileManager.default.removeItem(at: outputURL)
+            guard exportGeneration == generation else { return }
+            guard !error.isCancellation else { return }
+            lastError = .from("Failed to export image", error: error)
+        }
+    }
+
+    // MARK: - Import (load from tar)
+
+    func cancelImport() {
+        importGeneration &+= 1
+        importTask?.cancel()
+        importProgress = nil
+    }
+
+    func startImport(inputURL: URL) {
+        cancelImport()
+        let generation = importGeneration
+        importTask = Task { [weak self] in
+            await self?._importImage(inputURL: inputURL, generation: generation)
+        }
+    }
+
+    /// Loads images from an OCI tar archive, then unpacks each — the same two
+    /// phases as the CLI's `ImageLoad`. `load` itself reports no progress
+    /// (indeterminate "Loading tar archive"), but the subsequent `unpack` of each
+    /// loaded image is byte-level. Unpack uses `platform: nil` (not host-only like
+    /// pull) so the framework picks a default platform from the archive, avoiding
+    /// a mismatch error when the archive lacks the host architecture.
+    private func _importImage(inputURL: URL, generation: Int) async {
+        lastError = nil
+
+        let progress = OperationProgress()
+        progress.beginPhase("Loading tar archive…")
+        guard importGeneration == generation else { return }
+        importProgress = progress
+        defer { if importGeneration == generation { importProgress = nil } }
+
+        let progressHandler: ProgressUpdateHandler = { [weak progress] events in
+            await progress?.apply(events)
+        }
+
+        let coordinator = ProgressTaskCoordinator()
+        defer { Task { await coordinator.finish() } }
+
+        do {
+            let result = try await ClientImage.load(from: inputURL.path, force: false)
+            try Task.checkCancellation()
+
+            let unpackTask = await coordinator.startTask()
+            progress.beginPhase("Unpacking…")
+            for image in result.images {
+                try await image.unpack(
+                    platform: nil,
+                    progressUpdate: ProgressTaskCoordinator.handler(for: unpackTask, from: progressHandler))
+                try Task.checkCancellation()
+            }
+            await refresh()
+        } catch is CancellationError {
+            // User cancelled — not an error. defer sets importProgress = nil.
+        } catch {
+            guard importGeneration == generation else { return }
+            guard !error.isCancellation else { return }
+            lastError = .from("Failed to import image", error: error)
         }
     }
 }
