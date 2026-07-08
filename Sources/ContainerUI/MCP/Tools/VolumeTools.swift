@@ -39,6 +39,7 @@ enum VolumeTools {
     }
 
     static func handleList(bridge: MCPModelBridge) async throws -> CallTool.Result {
+        await bridge.volumes.refresh()
         let volumes = await MainActor.run { bridge.volumes.volumes }
         let items = volumes.map { v -> String in
             "\(v.name)"
@@ -59,6 +60,7 @@ enum VolumeTools {
         guard let name = arguments?["name"]?.stringValue, !name.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: name", annotations: nil, _meta: nil)], isError: true)
         }
+        await bridge.volumes.refresh()
         let volumes = await MainActor.run { bridge.volumes.volumes }
         guard let volume = volumes.first(where: { $0.name == name }) else {
             return .init(content: [.text(text: "Volume not found: \(name)", annotations: nil, _meta: nil)], isError: true)

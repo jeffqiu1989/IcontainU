@@ -38,6 +38,7 @@ enum ImageTools {
     }
 
     static func handleList(bridge: MCPModelBridge) async throws -> CallTool.Result {
+        await bridge.images.refresh()
         let images = await MainActor.run { bridge.images.images }
         let items = images.map { img -> String in
             img.displayReference
@@ -57,6 +58,7 @@ enum ImageTools {
         guard let id = arguments?["id"]?.stringValue, !id.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
+        await bridge.images.refresh()
         let images = await MainActor.run { bridge.images.images }
         guard let image = images.first(where: { $0.id == id || $0.displayReference == id }) else {
             return .init(content: [.text(text: "Image not found: \(id)", annotations: nil, _meta: nil)], isError: true)

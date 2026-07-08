@@ -40,6 +40,7 @@ enum NetworkTools {
     }
 
     static func handleList(bridge: MCPModelBridge) async throws -> CallTool.Result {
+        await bridge.networks.refresh()
         let networks = await MainActor.run { bridge.networks.networks }
         let items = networks.map { n -> String in
             "\(n.id) — \(n.configuration.name) (\(n.configuration.mode))"
@@ -61,6 +62,7 @@ enum NetworkTools {
         guard let id = arguments?["id"]?.stringValue, !id.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
+        await bridge.networks.refresh()
         let networks = await MainActor.run { bridge.networks.networks }
         guard let network = networks.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Network not found: \(id)", annotations: nil, _meta: nil)], isError: true)

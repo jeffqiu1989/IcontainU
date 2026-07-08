@@ -50,6 +50,7 @@ enum MachineTools {
     }
 
     static func handleList(bridge: MCPModelBridge) async throws -> CallTool.Result {
+        await bridge.machines.refresh()
         let machines = await MainActor.run { bridge.machines.machines }
         let items = machines.map { m -> String in
             let ip = m.ipAddress ?? "no IP"
@@ -62,6 +63,7 @@ enum MachineTools {
         guard let id = arguments?["id"]?.stringValue, !id.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
+        await bridge.machines.refresh()
         let machines = await MainActor.run { bridge.machines.machines }
         guard let machine = machines.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Machine not found: \(id)", annotations: nil, _meta: nil)], isError: true)
@@ -74,6 +76,7 @@ enum MachineTools {
         guard let id = arguments?["id"]?.stringValue, !id.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
+        await bridge.machines.refresh()
         let machines = await MainActor.run { bridge.machines.machines }
         guard let machine = machines.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Machine not found: \(id)", annotations: nil, _meta: nil)], isError: true)
@@ -86,6 +89,7 @@ enum MachineTools {
         guard let id = arguments?["id"]?.stringValue, !id.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
+        await bridge.machines.refresh()
         let machines = await MainActor.run { bridge.machines.machines }
         guard let machine = machines.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Machine not found: \(id)", annotations: nil, _meta: nil)], isError: true)
