@@ -52,7 +52,29 @@ final class MCPSettings {
     }
 
     func validateKey(_ token: String) -> Bool {
-        apiKeys.contains { $0.key == token }
+        // Reject empty/blank tokens outright (a stored empty key must never auth).
+        let candidate = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return false }
+        // Constant-time membership: check every key without early-return so the
+        // reply timing doesn't leak how many bytes of a key matched. `matched`
+        // is OR-accumulated across all keys instead of short-circuiting.
+        let candidateBytes = Array(candidate.utf8)
+        var matched = false
+        for apiKey in apiKeys {
+            matched = Self.constantTimeEqual(candidateBytes, Array(apiKey.key.utf8)) || matched
+        }
+        return matched
+    }
+
+    /// Length-independent constant-time byte compare. A length mismatch always
+    /// returns false, but only after touching the shorter buffer fully.
+    private static func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        var diff = UInt8(a.count == b.count ? 0 : 1)
+        let n = min(a.count, b.count)
+        for i in 0..<n {
+            diff |= a[i] ^ b[i]
+        }
+        return diff == 0
     }
 
     func save() {

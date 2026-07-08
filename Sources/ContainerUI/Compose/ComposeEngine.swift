@@ -81,6 +81,7 @@ enum ComposeEngine {
                     onStarted?(s)
                     started.append(s)
                 }
+                await injectHostsIncremental(project: project, client: client, startedService: service)
                 continue
             }
 
@@ -114,6 +115,7 @@ enum ComposeEngine {
             let s = StartedService(service: service, id: createdID, process: process)
             onStarted?(s)
             started.append(s)
+            await injectHostsIncremental(project: project, client: client, startedService: service)
         }
 
         // Wire up service discovery: the built-in DNS returns a wrong `28.0.0.x`
@@ -172,6 +174,34 @@ enum ComposeEngine {
     static func injectHosts(containers: [ContainerSnapshot]) async -> Set<String> {
         let mappings = HostsInjector.mappings(containers: containers)
         return await HostsInjector.inject(mappings)
+    }
+
+    /// Incremental hosts injection: after a service starts, publish every
+    /// running project container's hostname → IP into all project containers'
+    /// /etc/hosts BEFORE the next service starts. This lets a later one-shot
+    /// (e.g. an init container) resolve its siblings during its own lifetime —
+    /// the post-loop injection runs too late for one-shots that exit quickly.
+    /// Waits briefly for the just-started service's own IP so its hostname is
+    /// included in the block. Best-effort: on timeout, injects whatever is
+    /// known (the model's 2s poll still re-applies later).
+    private static func injectHostsIncremental(
+        project: String, client: ContainerClient, startedService: String
+    ) async {
+        for attempt in 0..<6 {
+            guard let all = try? await client.list(filters: ContainerListFilters.all.withoutMachines()) else {
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+            let mappings = HostsInjector.mappings(containers: all)
+            if mappings[project]?.endpoints[startedService] != nil {
+                _ = await HostsInjector.inject(mappings)
+                return
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        // Fallback after the wait: inject whatever IPs are known.
+        guard let all = try? await client.list(filters: ContainerListFilters.all.withoutMachines()) else { return }
+        _ = await HostsInjector.inject(HostsInjector.mappings(containers: all))
     }
 
     /// Tear a project down: delete all of its containers (by project label), then

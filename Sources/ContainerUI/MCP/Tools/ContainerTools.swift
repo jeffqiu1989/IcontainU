@@ -1,4 +1,5 @@
 import ContainerAPIClient
+import ContainerResource
 import Foundation
 import MCP
 
@@ -83,12 +84,13 @@ enum ContainerTools {
             ),
             Tool(
                 name: "container_logs",
-                description: "Fetch a container's stdout/stderr logs (one-shot snapshot, not followed).",
+                description: "Fetch a container's logs. By default returns the workload stdout/stderr (stdio.log); set boot=true for the vminitd boot log.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "id": .object(["type": .string("string"), "description": .string("Container ID or name")]),
                         "tail": .object(["type": .string("integer"), "description": .string("Number of lines to return from the end (default 200; 0 = all, subject to a 256 KB cap)")]),
+                        "boot": .object(["type": .string("boolean"), "description": .string("Return the vminitd boot log instead of the workload stdout/stderr")]),
                     ]),
                     "required": .array([.string("id")]),
                 ]),
@@ -110,7 +112,7 @@ enum ContainerTools {
     }
 
     static func handleList(bridge: MCPModelBridge) async throws -> CallTool.Result {
-        let containers = await MainActor.run { bridge.containers.containers }
+        let containers = await freshContainers(bridge: bridge)
         let items = containers.map { c -> String in
             "[\(c.status)] \(c.id) — \(c.configuration.image.reference) (networks: \(c.networks.map(\.network).joined(separator: ", ")))"
         }.joined(separator: "\n")
@@ -180,7 +182,7 @@ enum ContainerTools {
         }
         let args = arguments?["args"]?.arrayValue?.compactMap(\.stringValue) ?? []
         let user = arguments?["user"]?.stringValue
-        let containers = await MainActor.run { bridge.containers.containers }
+        let containers = await freshContainers(bridge: bridge)
         guard containers.contains(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Container not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
@@ -198,27 +200,25 @@ enum ContainerTools {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
         let tail = arguments?["tail"]?.intValue ?? 200
-        let containers = await MainActor.run { bridge.containers.containers }
+        let boot = arguments?["boot"]?.boolValue ?? false
+        let containers = await freshContainers(bridge: bridge)
         guard containers.contains(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Container not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
         // Fresh client per call — cached XPC connections go stale across apiserver
         // restarts (same rationale as ContainerLogsModel / ContainersModel).
         let handles = try await ContainerClient().logs(id: id)
+        // handles[0] = stdio.log (workload stdout+stderr), handles[1] = vminitd.log (boot log).
+        // Mirror the official `container logs` CLI: default to the workload log, `boot=true`
+        // selects the boot log. Read only one stream so `tail` always lands in the right log —
+        // concatenating then tailing left small tails entirely inside the appended boot log.
+        let handle = boot ? handles.dropFirst().first : handles.first
+        guard let handle else {
+            return .init(content: [.text(text: "(no logs)", annotations: nil, _meta: nil)])
+        }
         let maxBytes = 256 * 1024
-        var combined = ""
-        if let stdout = handles.first {
-            if let str = try await Self.readTail(stdout, maxBytes: maxBytes) {
-                combined += str
-            }
-        }
-        // handles[1], if present, is stderr.
-        if let stderr = handles.dropFirst().first {
-            if let str = try await Self.readTail(stderr, maxBytes: maxBytes), !str.isEmpty {
-                combined += combined.isEmpty ? str : "\n--- stderr ---\n" + str
-            }
-        }
-        let trimmed = Self.tailAndCap(combined, tailLines: tail, maxBytes: maxBytes)
+        let raw = (try await Self.readTail(handle, maxBytes: maxBytes)) ?? ""
+        let trimmed = Self.tailAndCap(raw, tailLines: tail, maxBytes: maxBytes)
         return .init(content: [.text(text: trimmed.isEmpty ? "(no logs)" : trimmed, annotations: nil, _meta: nil)])
     }
 
@@ -245,7 +245,7 @@ enum ContainerTools {
         guard let id = arguments?["id"]?.stringValue, !id.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: id", annotations: nil, _meta: nil)], isError: true)
         }
-        let containers = await MainActor.run { bridge.containers.containers }
+        let containers = await freshContainers(bridge: bridge)
         guard let c = containers.first(where: { $0.id == id }) else {
             return .init(content: [.text(text: "Container not found: \(id)", annotations: nil, _meta: nil)], isError: true)
         }
@@ -309,9 +309,23 @@ enum ContainerTools {
         }
         if tailLines > 0 {
             var lines = s.components(separatedBy: "\n")
+            // A trailing "\n" leaves a final empty element; drop it so `tail`
+            // counts real lines. Without this, tail=N returns N-1 lines and
+            // tail=1 returns "" -> "(no logs)" on newline-terminated logs.
+            if lines.last == "" { lines.removeLast() }
             if lines.count > tailLines { lines = Array(lines.suffix(tailLines)) }
             s = lines.joined(separator: "\n")
         }
         return s
+    }
+
+    /// Fresh container snapshot for read-type tools (list/exec/logs/inspect).
+    /// The model's `containers` cache is repopulated by a 2 s poll loop, so a read
+    /// immediately after compose_up, container_create, or an MCP reconnect can see
+    /// empty/stale data and wrongly report "No containers found" / "Container not
+    /// found". Refresh once before reading so the snapshot is current.
+    private static func freshContainers(bridge: MCPModelBridge) async -> [ContainerSnapshot] {
+        await bridge.containers.refresh()
+        return await MainActor.run { bridge.containers.containers }
     }
 }
