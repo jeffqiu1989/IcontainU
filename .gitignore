@@ -13,3 +13,5 @@ DerivedData/
 *.zip
 .mcp.json
 docs/MCP.md
+# Local compose bind-mount test data
+/mysql-data/
