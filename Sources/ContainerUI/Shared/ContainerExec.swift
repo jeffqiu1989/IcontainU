@@ -53,6 +53,47 @@ enum ContainerExec {
         }
     }
 
+    /// Run `container exec [-u user] <id> <command> [args]` to completion and
+    /// capture stdout, stderr, and the exit code. Unlike `run`, a non-zero exit
+    /// is **not** an error — the code is returned so callers (the MCP
+    /// `container_exec` tool) can report success/failure themselves. Throws only
+    /// on a missing binary or a launch failure.
+    ///
+    /// stdout and stderr are drained concurrently with `waitUntilExit` so a
+    /// command that emits more than the pipe buffer (~64 KB) on either stream
+    /// can't deadlock the process while we wait for it to exit.
+    static func runCapture(
+        id: String, command: String, args: [String],
+        user: String? = nil
+    ) async throws -> (stdout: String, stderr: String, exitCode: Int32) {
+        guard let bin = binaryPath else { throw Error.containerNotFound }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: bin)
+        var argv = ["exec"]
+        if let user { argv += ["-u", user] }
+        argv += [id, command] + args
+        process.arguments = argv
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        // Drain both pipes off the calling thread so a large output can't fill
+        // the pipe buffer and block the process before `waitUntilExit` returns.
+        let outHandle = stdoutPipe.fileHandleForReading
+        let errHandle = stderrPipe.fileHandleForReading
+        let outTask = Task.detached { try outHandle.readToEnd() }
+        let errTask = Task.detached { try errHandle.readToEnd() }
+        process.waitUntilExit()
+        let outData = (try? await outTask.value) ?? Data()
+        let errData = (try? await errTask.value) ?? Data()
+        return (
+            stdout: String(data: outData, encoding: .utf8) ?? "",
+            stderr: String(data: errData, encoding: .utf8) ?? "",
+            exitCode: process.terminationStatus
+        )
+    }
+
     /// Run a health-check probe via `container exec` and report whether it
     /// succeeded. Unlike `run`, this:
     ///   - returns `Bool` instead of throwing on non-zero exit (a non-zero exit

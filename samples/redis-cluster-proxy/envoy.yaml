@@ -1,0 +1,55 @@
+# Envoy redis_proxy filter in front of a 3-node Redis Cluster.
+#
+# envoy.clusters.redis discovers the cluster topology (CLUSTER SLOTS) from the
+# seed endpoints and routes each command to the owning shard. enable_redirection
+# makes Envoy follow MOVED/ASK on topology changes rather than surfacing them to
+# the client — so a downstream client treats Envoy as a single (non-cluster)
+# Redis endpoint and never needs -c or cluster awareness.
+
+static_resources:
+  listeners:
+    - name: redis_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 6379
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.redis_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.redis_proxy.v3.RedisProxy
+                stat_prefix: redis
+                prefix_routes:
+                  catch_all_route:
+                    cluster: redis_cluster
+                settings:
+                  op_timeout: 5s
+                  enable_redirection: true
+
+  clusters:
+    - name: redis_cluster
+      connect_timeout: 1s
+      lb_policy: CLUSTER_PROVIDED
+      cluster_type:
+        name: envoy.clusters.redis
+        typed_config:
+          "@type": type.googleapis.com/google.protobuf.Struct
+      load_assignment:
+        cluster_name: redis_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis-node-0
+                      port_value: 6379
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis-node-1
+                      port_value: 6379
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis-node-2
+                      port_value: 6379

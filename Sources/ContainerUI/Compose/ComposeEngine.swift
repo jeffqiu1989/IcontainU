@@ -16,20 +16,44 @@ enum ComposeEngine {
 
     private static let plugin = "container-network-vmnet"
 
+    /// A service's started process, retained so a later `wait()` can read its
+    /// exit code (which the container snapshot doesn't carry). Returned by `up`
+    /// for every service it starts this call — new creates and idempotent
+    /// restarts alike. A service left already-running (not restarted) has no
+    /// fresh process and is omitted.
+    struct StartedService: Sendable {
+        let service: String
+        let id: String
+        let process: ClientProcess
+    }
+
     /// Bring a project up. Idempotent: a service whose container already exists is
     /// started (if stopped) rather than recreated, so a second Up doesn't fail.
     ///
     /// `beginPhase` mirrors `ContainerCreateEngine.create`'s contract — it's called
     /// at each phase boundary with a label and returns the progress handler for that
     /// phase. Per-service phases are prefixed with the service name.
+    ///
+    /// Returns the processes started this call, so a caller doing `up wait` can
+    /// `wait()` on a one-shot/init service's exit and capture its code.
+    ///
+    /// `onStarted` is invoked the instant each service's process starts, BEFORE
+    /// the rest of Up (later services, the ~10s hosts-injection poll) runs. A
+    /// one-shot that exits quickly would otherwise be gone before Up returns —
+    /// and `wait()` on an already-exited container's init process hangs (a
+    /// framework quirk) — so the caller must attach its `wait()` here, while the
+    /// process is still live, not from the returned array afterward.
+    @discardableResult
     static func up(
         project: String,
         parse: ComposeParseResult,
+        onStarted: (@Sendable (StartedService) -> Void)? = nil,
         beginPhase: @escaping @Sendable (String) async -> ProgressUpdateHandler
-    ) async throws {
+    ) async throws -> [StartedService] {
         try await createNetworks(parse.declaredNetworks, project: project, beginPhase: beginPhase)
         try await createVolumes(parse.declaredVolumes, project: project, beginPhase: beginPhase)
 
+        var started: [StartedService] = []
         let client = ContainerClient()
         for service in parse.orderedServices {
             guard let spec = parse.specs[service] else { continue }
@@ -53,7 +77,11 @@ enum ComposeEngine {
                     _ = await beginPhase("\(service): starting…")
                     let process = try await client.bootstrap(id: id, stdio: [nil, nil, nil])
                     try await process.start()
+                    let s = StartedService(service: service, id: id, process: process)
+                    onStarted?(s)
+                    started.append(s)
                 }
+                await injectHostsIncremental(project: project, client: client, startedService: service)
                 continue
             }
 
@@ -81,9 +109,13 @@ enum ComposeEngine {
 
             try Task.checkCancellation()
             log.info("creating compose service", metadata: ["project": "\(project)", "service": "\(service)"])
-            _ = try await ContainerCreateEngine.create(spec: spec) { label in
+            let (createdID, process) = try await ContainerCreateEngine.createRetainingProcess(spec: spec) { label in
                 await beginPhase("\(service): \(label)")
             }
+            let s = StartedService(service: service, id: createdID, process: process)
+            onStarted?(s)
+            started.append(s)
+            await injectHostsIncremental(project: project, client: client, startedService: service)
         }
 
         // Wire up service discovery: the built-in DNS returns a wrong `28.0.0.x`
@@ -106,6 +138,8 @@ enum ComposeEngine {
             }
             try? await Task.sleep(for: .seconds(1))
         }
+
+        return started
     }
 
     /// Start all stopped containers belonging to `project`. Unlike `up`, this
@@ -140,6 +174,34 @@ enum ComposeEngine {
     static func injectHosts(containers: [ContainerSnapshot]) async -> Set<String> {
         let mappings = HostsInjector.mappings(containers: containers)
         return await HostsInjector.inject(mappings)
+    }
+
+    /// Incremental hosts injection: after a service starts, publish every
+    /// running project container's hostname → IP into all project containers'
+    /// /etc/hosts BEFORE the next service starts. This lets a later one-shot
+    /// (e.g. an init container) resolve its siblings during its own lifetime —
+    /// the post-loop injection runs too late for one-shots that exit quickly.
+    /// Waits briefly for the just-started service's own IP so its hostname is
+    /// included in the block. Best-effort: on timeout, injects whatever is
+    /// known (the model's 2s poll still re-applies later).
+    private static func injectHostsIncremental(
+        project: String, client: ContainerClient, startedService: String
+    ) async {
+        for attempt in 0..<6 {
+            guard let all = try? await client.list(filters: ContainerListFilters.all.withoutMachines()) else {
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+            let mappings = HostsInjector.mappings(containers: all)
+            if mappings[project]?.endpoints[startedService] != nil {
+                _ = await HostsInjector.inject(mappings)
+                return
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        // Fallback after the wait: inject whatever IPs are known.
+        guard let all = try? await client.list(filters: ContainerListFilters.all.withoutMachines()) else { return }
+        _ = await HostsInjector.inject(HostsInjector.mappings(containers: all))
     }
 
     /// Tear a project down: delete all of its containers (by project label), then

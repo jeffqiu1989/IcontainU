@@ -1,0 +1,72 @@
+# Redis Cluster (official redis:7) behind an Envoy redis_proxy — externally
+# reachable via the host's mapped port, with NO bitnami image.
+#
+# Architecture:
+#   external client ──→ host:6379 ──→ envoy ──→ {redis-node-0/1/2} (internal)
+#   (plain Redis, no -c)              (slot-aware proxy, handles MOVED internally)
+#
+# The three redis:7 nodes form a cluster exactly as in samples/redis-cluster/:
+# cluster-announce-hostname + IcontainU's /etc/hosts injection routes node-to-
+# node gossip over real eth0 IPs (sidestepping the DNS 28.x bug). Default
+# cluster-preferred-endpoint-type=ip means MOVED responses carry real IPs,
+# which Envoy (same network) can reach directly.
+#
+# Envoy uses the envoy.clusters.redis cluster type: it queries CLUSTER SLOTS
+# from the seed nodes and routes each command to the owning shard, following
+# MOVED/ASK on topology changes. The client never sees a redirect.
+#
+# Limitations of Envoy's redis filter (vs. a real cluster client):
+#   - Not every Redis command is supported in cluster mode (multi-key commands
+#     spanning slots, PUBSUB, some admin commands). GET/SET/DEL/INCR/etc. work.
+#   - Auth here is disabled for simplicity; see notes below to add it.
+#
+# Envoy config is bind-mounted from ./envoy.yaml next to this file. On UI import
+# the relative path resolves against this directory; via MCP compose_up (no base
+# directory) use an absolute host path instead.
+
+services:
+  redis-node-0:
+    image: docker.io/library/redis:7
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--cluster-announce-hostname", "redis-node-0"]
+    volumes:
+      - redis-cluster_data-0:/data
+  redis-node-1:
+    image: docker.io/library/redis:7
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--cluster-announce-hostname", "redis-node-1"]
+    volumes:
+      - redis-cluster_data-1:/data
+  redis-node-2:
+    image: docker.io/library/redis:7
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--cluster-announce-hostname", "redis-node-2"]
+    volumes:
+      - redis-cluster_data-2:/data
+  redis-cluster-init:
+    image: docker.io/library/redis:7
+    depends_on:
+      - redis-node-0
+      - redis-node-1
+      - redis-node-2
+    command:
+      - sh
+      - -c
+      - |
+        for i in $(seq 1 30); do
+          redis-cli -h redis-node-0 ping && redis-cli -h redis-node-1 ping && redis-cli -h redis-node-2 ping && break
+          sleep 1
+        done
+        redis-cli --cluster create redis-node-0:6379 redis-node-1:6379 redis-node-2:6379 --cluster-replicas 0 --cluster-yes
+  envoy:
+    image: docker.io/envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - redis-node-0
+      - redis-node-1
+      - redis-node-2
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+volumes:
+  redis-cluster_data-0:
+  redis-cluster_data-1:
+  redis-cluster_data-2:

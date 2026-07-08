@@ -1,0 +1,54 @@
+# Redis Cluster — 3 masters, 0 replicas
+#
+# Uses the official redis:7 image (NOT bitnami/redis-cluster). Redis 7's
+# CLUSTER MEET accepts hostnames and `cluster-announce-hostname` lets each node
+# advertise its service name; peers resolve it via the /etc/hosts block IcontainU
+# injects (service short name -> real eth0 IP), which sidesteps the container
+# inter-DNS 28.x bug.
+#
+# redis-cluster-init is a one-shot container that waits for the three nodes to
+# answer PING, then runs `redis-cli --cluster create`. It exits 0 once the
+# cluster is formed.
+#
+# Password comes from .env (REDIS_PASSWD). UI import loads .env from this
+# directory automatically; via MCP compose_up, set REDIS_PASSWD in the app's
+# environment or substitute it (MCP compose_up has no base directory, so .env
+# is not read — see MCP gap notes).
+
+services:
+  redis-node-0:
+    image: docker.io/library/redis:7
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWD}", "--masterauth", "${REDIS_PASSWD}", "--cluster-announce-hostname", "redis-node-0"]
+    volumes:
+      - redis-cluster_data-0:/data
+  redis-node-1:
+    image: docker.io/library/redis:7
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWD}", "--masterauth", "${REDIS_PASSWD}", "--cluster-announce-hostname", "redis-node-1"]
+    volumes:
+      - redis-cluster_data-1:/data
+  redis-node-2:
+    image: docker.io/library/redis:7
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWD}", "--masterauth", "${REDIS_PASSWD}", "--cluster-announce-hostname", "redis-node-2"]
+    volumes:
+      - redis-cluster_data-2:/data
+  redis-cluster-init:
+    image: docker.io/library/redis:7
+    depends_on:
+      - redis-node-0
+      - redis-node-1
+      - redis-node-2
+    environment:
+      - "REDISCLI_AUTH=${REDIS_PASSWD}"
+    command:
+      - sh
+      - -c
+      - |
+        for i in $(seq 1 30); do
+          redis-cli -h redis-node-0 ping && redis-cli -h redis-node-1 ping && redis-cli -h redis-node-2 ping && break
+          sleep 1
+        done
+        redis-cli --cluster create redis-node-0:6379 redis-node-1:6379 redis-node-2:6379 --cluster-replicas 0 --cluster-yes
+volumes:
+  redis-cluster_data-0:
+  redis-cluster_data-1:
+  redis-cluster_data-2:

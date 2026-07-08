@@ -24,6 +24,18 @@ enum ContainerCreateEngine {
         spec: ContainerCreateSpec,
         beginPhase: @Sendable (String) async -> ProgressUpdateHandler
     ) async throws -> String {
+        try await createRetainingProcess(spec: spec, beginPhase: beginPhase).id
+    }
+
+    /// Same as `create`, but also returns the started `ClientProcess`. Compose's
+    /// `up wait` needs the handle to `wait()` on a one-shot/init container's exit
+    /// and read its code — a `ContainerSnapshot` carries only `RuntimeStatus`, so
+    /// the exit code is obtainable only from the process started here. Callers
+    /// that don't need the handle use `create` (which discards it).
+    static func createRetainingProcess(
+        spec: ContainerCreateSpec,
+        beginPhase: @Sendable (String) async -> ProgressUpdateHandler
+    ) async throws -> (id: String, process: ClientProcess) {
         let config = try await SystemConfig.load()
         let client = ContainerClient()
 
@@ -147,7 +159,7 @@ enum ContainerCreateEngine {
         let process = try await client.bootstrap(id: id, stdio: [nil, nil, nil])
         try await process.start()
         log.info("container started", metadata: ["id": "\(id)"])
-        return id
+        return (id, process)
     }
 
     // MARK: - Flag assembly

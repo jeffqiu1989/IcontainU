@@ -19,6 +19,10 @@ let package = Package(
         // `container` package (pinned to 6.2.2 in Package.resolved); declared here as
         // a direct dependency so `import Yams` resolves.
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.2"),
+        // MCP server for remote AI client access
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+        // NIO for MCP HTTP server (transitive via swift-sdk, declared here for direct import)
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
     ],
     targets: [
         .executableTarget(
@@ -36,6 +40,10 @@ let package = Package(
                 .product(name: "ContainerizationArchive", package: "containerization"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Yams", package: "yams"),
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
             ],
             path: "Sources/ContainerUI"
         ),

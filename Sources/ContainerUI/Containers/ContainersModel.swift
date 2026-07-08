@@ -105,42 +105,56 @@ final class ContainersModel {
     /// Detached start: bootstrap with no stdio attached, then start the process.
     func start(_ container: ContainerSnapshot) async {
         lastError = nil
-        busyItemIDs.insert(container.id)
-        defer { busyItemIDs.remove(container.id) }
         do {
-            let process = try await client.bootstrap(id: container.id, stdio: [nil, nil, nil])
-            try await process.start()
-            await refresh()
+            try await startThrowing(container)
         } catch {
             guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to start container", detail: error.localizedDescription)
         }
     }
 
-    func stop(_ container: ContainerSnapshot) async {
-        lastError = nil
+    /// Throwing core shared with the MCP layer, which needs the failure to
+    /// propagate as an RPC error instead of being swallowed into `lastError`.
+    func startThrowing(_ container: ContainerSnapshot) async throws {
         busyItemIDs.insert(container.id)
         defer { busyItemIDs.remove(container.id) }
+        let process = try await client.bootstrap(id: container.id, stdio: [nil, nil, nil])
+        try await process.start()
+        await refresh()
+    }
+
+    func stop(_ container: ContainerSnapshot) async {
+        lastError = nil
         do {
-            try await client.stop(id: container.id)
-            await refresh()
+            try await stopThrowing(container)
         } catch {
             guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to stop container", detail: error.localizedDescription)
         }
     }
 
-    func delete(_ container: ContainerSnapshot, force: Bool) async {
-        lastError = nil
+    func stopThrowing(_ container: ContainerSnapshot) async throws {
         busyItemIDs.insert(container.id)
         defer { busyItemIDs.remove(container.id) }
+        try await client.stop(id: container.id)
+        await refresh()
+    }
+
+    func delete(_ container: ContainerSnapshot, force: Bool) async {
+        lastError = nil
         do {
-            try await client.delete(id: container.id, force: force)
-            await refresh()
+            try await deleteThrowing(container, force: force)
         } catch {
             guard !error.isCancellation else { return }
             lastError = OperationError(title: "Failed to delete container", detail: error.localizedDescription)
         }
+    }
+
+    func deleteThrowing(_ container: ContainerSnapshot, force: Bool) async throws {
+        busyItemIDs.insert(container.id)
+        defer { busyItemIDs.remove(container.id) }
+        try await client.delete(id: container.id, force: force)
+        await refresh()
     }
 
     /// Open an interactive shell in the container via the system Terminal.
@@ -321,6 +335,16 @@ final class ContainersModel {
         createTask = Task { [weak self] in
             await self?._create(spec: spec, generation: generation)
         }
+    }
+
+    /// Throwing, synchronous-completion create for the MCP layer. Runs the same
+    /// engine as `_create` but awaits the result and returns the new container
+    /// ID (or throws) instead of driving the UI progress bar — an RPC client
+    /// wants the outcome, not a fire-and-forget "started".
+    func createAndWait(spec: ContainerCreateSpec) async throws -> String {
+        let id = try await ContainerCreateEngine.create(spec: spec) { _ in { _ in } }
+        await refresh()
+        return id
     }
 
     private func _create(spec: ContainerCreateSpec, generation: Int) async {

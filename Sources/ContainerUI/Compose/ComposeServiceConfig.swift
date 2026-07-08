@@ -87,7 +87,7 @@ final class ComposeServiceConfig: Identifiable {
             serviceName: name,
             image: service.image ?? "",
             containerName: service.containerName ?? defaultContainerName,
-            command: service.command.joined(separator: " "),
+            command: CommandTokenizer.join(service.command),
             ports: Self.parsePorts(service.ports),
             envs: Self.parseEnv(service.environment),
             mounts: Self.parseVolumes(service.volumes),
@@ -170,7 +170,7 @@ final class ComposeServiceConfig: Identifiable {
             changed = true
         }
 
-        let originalCommand = original.command.joined(separator: " ")
+        let originalCommand = CommandTokenizer.join(original.command)
         if command != originalCommand {
             override.command = CommandTokenizer.tokenize(command)
             changed = true

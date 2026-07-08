@@ -14,6 +14,10 @@ struct ContainerUIApp: App {
     @State private var networksModel = NetworksModel()
     @State private var volumesModel = VolumesModel()
 
+    @State private var mcpSettings = MCPSettings()
+    @State private var mcpRequestLog = MCPRequestLog()
+    @State private var mcpServerManager: MCPServerManager?
+
     init() {
         // Route swift-log to stderr so `swift run IcontainU` shows the full
         // create pipeline (every flag passed to containerConfigFromFlags) in the
@@ -42,7 +46,26 @@ struct ContainerUIApp: App {
                 .environment(machinesModel)
                 .environment(networksModel)
                 .environment(volumesModel)
+                .environment(mcpServerManager)
                 .frame(minWidth: 900, minHeight: 540)
+                .onAppear {
+                    guard mcpServerManager == nil else { return }
+                    let manager = MCPServerManager(
+                        settings: mcpSettings,
+                        requestLog: mcpRequestLog,
+                        containersModel: containersModel,
+                        imagesModel: imagesModel,
+                        machinesModel: machinesModel,
+                        volumesModel: volumesModel,
+                        networksModel: networksModel,
+                        composeModel: composeModel,
+                        systemModel: systemModel
+                    )
+                    mcpServerManager = manager
+                    if mcpSettings.isEnabled {
+                        Task { try? await manager.start() }
+                    }
+                }
         }
         .windowResizability(.contentMinSize)
     }
