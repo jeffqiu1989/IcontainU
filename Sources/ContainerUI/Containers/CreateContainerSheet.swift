@@ -100,6 +100,10 @@ struct CreateContainerSheet: View {
                     let resolved = path.hasPrefix("~")
                         ? (path as NSString).expandingTildeInPath
                         : path
+                    // Skip if the source already exists — a file bind-mount is
+                    // ready as-is and must not be turned into a directory; an
+                    // existing directory is a no-op too.
+                    if fm.fileExists(atPath: resolved) { continue }
                     do {
                         try fm.createDirectory(atPath: resolved, withIntermediateDirectories: true)
                     } catch {

@@ -80,4 +80,25 @@ enum CommandTokenizer {
         flush()
         return tokens
     }
+
+    /// The inverse of `tokenize`: join an argv back into a single command-line
+    /// string that `tokenize` can round-trip losslessly. An element containing
+    /// whitespace, newlines, or quote/backslash characters is wrapped in double
+    /// quotes with `\` and `"` backslash-escaped — double quotes preserve
+    /// newlines (and single quotes) literally, so a multi-line `sh -c` script
+    /// survives the form's text-field round-trip instead of being split into
+    /// separate argv tokens (which turned `for…do…break\nsleep 1\ndone` into a
+    /// syntax-error shell script).
+    static func join(_ tokens: [String]) -> String {
+        tokens.map { token in
+            let needsQuoting = token.isEmpty || token.contains { ch in
+                ch == " " || ch == "\t" || ch == "\n" || ch == "'" || ch == "\"" || ch == "\\"
+            }
+            guard needsQuoting else { return token }
+            let escaped = token
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        }.joined(separator: " ")
+    }
 }

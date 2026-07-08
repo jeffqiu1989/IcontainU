@@ -279,6 +279,10 @@ struct ImportComposeSheet: View {
                 for vol in spec.volumes {
                     guard let source = vol.split(separator: ":").first.map(String.init),
                           source.hasPrefix("/") else { continue }
+                    // Skip if the source already exists — a file bind-mount
+                    // (e.g. ./envoy.yaml) is ready as-is and must not be turned
+                    // into a directory; an existing directory is a no-op too.
+                    if fm.fileExists(atPath: source) { continue }
                     do {
                         try fm.createDirectory(atPath: source, withIntermediateDirectories: true)
                     } catch {
