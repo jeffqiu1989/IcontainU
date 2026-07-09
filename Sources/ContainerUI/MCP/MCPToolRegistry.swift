@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import Yams
 
 /// Per-session mutable holder for the authenticated key name. MCPSessionManager
 /// sets it when a session is created; the CallTool handler reads it when
@@ -85,16 +86,32 @@ struct MCPToolRegistry: Sendable {
         return nil
     }
 
-    /// Serialize a tool call's arguments to a pretty-printed JSON string for the
-    /// request-log detail view. Nil for empty/nil args so the detail stays quiet
-    /// for no-arg tools (container_list, etc.).
+    /// Serialize a tool call's arguments to a readable YAML string for the
+    /// request-log detail popover. YAML renders multi-line strings as block
+    /// scalars (real newlines, not escaped `\n`), leaves `/` unescaped, and uses
+    /// `-` for arrays - readable, unlike JSONEncoder's escaped output. Nil for
+    /// empty/nil args so the detail stays quiet for no-arg tools.
     private static func encodeParams(_ arguments: [String: Value]?) -> String? {
         guard let arguments, !arguments.isEmpty else { return nil }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(arguments),
-              let json = String(data: data, encoding: .utf8) else { return nil }
-        return json
+        let any: [String: Any] = arguments.mapValues(Self.valueToAny)
+        return try? Yams.dump(object: any, sortKeys: true)
+    }
+
+    /// Recursively convert an MCP `Value` to a Yams-encodable `Any`.
+    private static func valueToAny(_ value: Value) -> Any {
+        switch value {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .int(let i): return i
+        case .double(let d): return d
+        case .string(let s): return s
+        case .data(let mime, _): return "<data \(mime ?? "")>"
+        case .array(let arr): return arr.map(Self.valueToAny)
+        case .object(let obj):
+            var d: [String: Any] = [:]
+            for (k, v) in obj { d[k] = Self.valueToAny(v) }
+            return d
+        }
     }
 
     private func dispatch(name: String, arguments: [String: Value]?) async throws -> CallTool.Result {

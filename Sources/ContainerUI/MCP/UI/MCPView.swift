@@ -10,7 +10,7 @@ struct MCPView: View {
     @State private var showGeneratedKey = false
     @State private var exportKey: MCPSettings.APIKey?
     @State private var portText = ""
-    @State private var selectedEntryID: MCPRequestLog.Entry.ID?
+    @State private var detailEntry: MCPRequestLog.Entry?
 
     var body: some View {
         ScrollView {
@@ -228,7 +228,7 @@ struct MCPView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 4)
                 } else {
-                    Table(server.requestLog.entries, selection: $selectedEntryID) {
+                    Table(server.requestLog.entries) {
                         TableColumn("Time") { entry in
                             Text(entry.timestamp, style: .time)
                                 .font(.system(.caption, design: .monospaced))
@@ -271,12 +271,25 @@ struct MCPView: View {
                                 .truncationMode(.tail)
                         }
                         .width(min: 120, ideal: 200)
+                        TableColumn("Details") { entry in
+                            if entry.params != nil || entry.errorMessage != nil {
+                                Text("details")
+                                    .foregroundColor(.accentColor)
+                                    .underline()
+                                    .onTapGesture { detailEntry = entry }
+                                    .popover(isPresented: Binding(
+                                        get: { detailEntry?.id == entry.id },
+                                        set: { if !$0 { detailEntry = nil } }
+                                    )) {
+                                        logDetailPopover(entry)
+                                    }
+                            } else {
+                                Text("-").foregroundStyle(.secondary)
+                            }
+                        }
+                        .width(60)
                     }
                     .frame(minHeight: 160, idealHeight: 220)
-
-                    if let selected = server.requestLog.entries.first(where: { $0.id == selectedEntryID }) {
-                        logDetail(selected)
-                    }
                 }
             }
         }
@@ -369,42 +382,43 @@ struct MCPView: View {
         return preferred ?? fallback
     }
 
-    /// Master-detail strip under the log table: full params + full error for the
-    /// selected row, so neither is lost to the table's single-line truncation.
+    /// Popover content for a log row's "details" link: full params (YAML) +
+    /// full error, scrollable and selectable so neither is lost to the table's
+    /// single-line truncation.
     @ViewBuilder
-    private func logDetail(_ entry: MCPRequestLog.Entry) -> some View {
-        Divider()
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Text(entry.toolName).font(.caption.weight(.semibold))
-                if let key = entry.keyName {
-                    Text("key: \(key)").font(.caption).foregroundStyle(.secondary)
+    private func logDetailPopover(_ entry: MCPRequestLog.Entry) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(entry.toolName).font(.caption.weight(.semibold))
+                    if let key = entry.keyName {
+                        Text("key: \(key)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(String(format: "%.0f ms", entry.duration * 1000))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Text(String(format: "%.0f ms", entry.duration * 1000))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                if let params = entry.params {
+                    Text("Parameters").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(params)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let err = entry.errorMessage {
+                    Text("Error").font(.caption.weight(.semibold)).foregroundStyle(.red)
+                    Text(err)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            if let params = entry.params {
-                Text("Parameters").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Text(params)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-            }
-            if let err = entry.errorMessage {
-                Text("Error").font(.caption.weight(.semibold)).foregroundStyle(.red)
-                Text(err)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            }
+            .padding(12)
+            .frame(maxWidth: 480)
         }
+        .frame(maxHeight: 360)
     }
 }
 
