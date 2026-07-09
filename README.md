@@ -30,6 +30,7 @@ Two things make IcontainU worth your dock:
 - **🃏 Everything on a card** — Start / Stop / Shell / Logs / Delete per container, plus a live **stats** tab and streaming logs.
 - **✨ Friction removers** — tap to copy an IP or `ip:port`, tap a mount to open it in Finder, local‑image autocomplete, and Docker‑style auto‑naming.
 - **🚀 Frictionless setup** — first launch auto‑installs the kernel and monitors `container` health for you.
+- **🤖 MCP server** - a built-in [Model Context Protocol](https://modelcontextprotocol.io) server exposes every container, image, machine, volume, network, and Compose operation as a tool, so Claude Code, OpenCode, or any MCP client can drive IcontainU remotely over HTTP with a Bearer API key. See [docs/MCP.md](docs/MCP.md) for the full 19-tool API.
 
 ## Screenshots
 
@@ -61,7 +62,7 @@ Without a running `container` system the app still opens, but the sidebar stays 
 
 ## Download & install
 
-Download `IcontainU-v0.2.0.zip` from [Releases](../../releases), unzip, and move `IcontainU.app` to Applications.
+Download `IcontainU-v0.3.0.zip` from [Releases](../../releases), unzip, and move `IcontainU.app` to Applications.
 
 Not notarized — on first launch, right‑click → Open, or run:
 
@@ -79,9 +80,33 @@ swift build && swift run IcontainU
 ./scripts/package-app.sh
 ```
 
+## MCP server
+
+IcontainU ships an embedded [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI client can operate containers, images, machines, volumes, networks, and Compose projects on your behalf - useful for "bring this stack up and verify it's healthy" workflows driven from Claude Code, OpenCode, or any MCP-compatible client.
+
+- **Transport**: MCP over Streamable HTTP at `/mcp` (swift-nio server, default port `3000`).
+- **Auth**: Bearer API key, generated and managed in the in-app **MCP** panel. Constant-time comparison; no key, no access.
+- **Bind**: `127.0.0.1` (localhost only) by default; switch to `0.0.0.0` in the panel to reach it from the LAN.
+- **Tools**: 19 tools across 6 resource groups - `container_list/create/start/stop/delete/exec/logs/inspect`, `image_list/pull`, `machine_list/boot/stop/delete`, `network_list/create/delete`, `volume_list/create/delete`, and `compose_list/status/up/down`.
+
+Full tool schemas, parameters, and examples: [docs/MCP.md](docs/MCP.md).
+
+Quick start from a client config (`.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "icontainu": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": { "Authorization": "Bearer <your-api-key>" }
+    }
+  }
+}
+```
+
 ## Status & known limitations
 
-**0.2.0** — early, but useful day to day.
+**0.3.0** — early, but useful day to day.
 
 - `Shell` opens Terminal.app — no embedded terminal yet.
 - System configuration is **view‑only** in the app; edit it via the CLI.
