@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Control panel for the embedded MCP server: enable/disable, bind config, API
 /// keys, and a live request log. Styled to match the app's other settings-style
@@ -9,7 +8,9 @@ struct MCPView: View {
     @State private var showNewKeySheet = false
     @State private var generatedKey: MCPSettings.APIKey?
     @State private var showGeneratedKey = false
+    @State private var exportKey: MCPSettings.APIKey?
     @State private var portText = ""
+    @State private var selectedEntryID: MCPRequestLog.Entry.ID?
 
     var body: some View {
         ScrollView {
@@ -44,6 +45,9 @@ struct MCPView: View {
             if let key = generatedKey {
                 Text("Key: \(key.key)\n\nCopy it now — it won't be shown again.")
             }
+        }
+        .sheet(item: $exportKey) { key in
+            ExportConfigSheet(key: key, host: exportHost(), port: server.settings.port)
         }
     }
 
@@ -108,20 +112,6 @@ struct MCPView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-
-                HStack {
-                    Button {
-                        exportConfig()
-                    } label: {
-                        Label("Export Config", systemImage: "square.and.arrow.up")
-                    }
-                    .controlSize(.small)
-                    .disabled(server.settings.apiKeys.isEmpty)
-                    .help(server.settings.apiKeys.isEmpty
-                          ? "Generate an API key first"
-                          : "Export a .mcp.json client config using the first API key")
-                    Spacer(minLength: 0)
-                }
             }
         }
     }
@@ -197,6 +187,21 @@ struct MCPView: View {
             Text("••••" + key.key.suffix(6))
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(key.key, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .help("Copy key")
+            Button {
+                exportKey = key
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .help("Export client config")
             Button(role: .destructive) {
                 server.settings.deleteKey(id: key.id)
             } label: {
@@ -223,12 +228,20 @@ struct MCPView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 4)
                 } else {
-                    Table(server.requestLog.entries) {
+                    Table(server.requestLog.entries, selection: $selectedEntryID) {
                         TableColumn("Time") { entry in
                             Text(entry.timestamp, style: .time)
                                 .font(.system(.caption, design: .monospaced))
                         }
                         .width(min: 60, ideal: 70)
+                        TableColumn("Key") { entry in
+                            Text(entry.keyName ?? "-")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .width(min: 60, ideal: 90)
                         TableColumn("Tool") { entry in
                             Text(entry.toolName)
                                 .font(.system(.caption, design: .monospaced))
@@ -255,10 +268,15 @@ struct MCPView: View {
                                 .font(.caption)
                                 .foregroundStyle(entry.errorMessage != nil ? .red : .secondary)
                                 .lineLimit(1)
-                                .help(entry.errorMessage ?? "")
+                                .truncationMode(.tail)
                         }
+                        .width(min: 120, ideal: 200)
                     }
                     .frame(minHeight: 160, idealHeight: 220)
+
+                    if let selected = server.requestLog.entries.first(where: { $0.id == selectedEntryID }) {
+                        logDetail(selected)
+                    }
                 }
             }
         }
@@ -319,35 +337,73 @@ struct MCPView: View {
         Task { try? await server.restart() }
     }
 
-    /// Export a `.mcp.json` client config (Claude Code / OpenCode shape) for the
-    /// first API key. When bound to 0.0.0.0 the connect target is rewritten to
-    /// 127.0.0.1 - a client on the same machine reaches localhost either way, and
-    /// 0.0.0.0 is not a valid connect destination. For LAN/remote use, edit the
-    /// exported file to point at the host's IP.
-    private func exportConfig() {
-        guard let key = server.settings.apiKeys.first else { return }
-        let host = server.settings.bindAddress == "0.0.0.0" ? "127.0.0.1" : server.settings.bindAddress
-        let endpoint = "http://\(host):\(server.settings.port)\(MCPConstants.endpoint)"
-        let config: [String: Any] = [
-            "mcpServers": [
-                "icontainu": [
-                    "url": endpoint,
-                    "headers": ["Authorization": "Bearer \(key.key)"],
-                ]
-            ]
-        ]
-        let panel = NSSavePanel()
-        panel.title = "Export MCP Config"
-        panel.nameFieldStringValue = ".mcp.json"
-        panel.allowedContentTypes = [UTType.json]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: url)
-        } catch {
-            // Best-effort: a failed write leaves the user at the save panel;
-            // there's no dedicated error surface on this view, so stay silent.
+    private func exportHost() -> String {
+        switch server.settings.bindAddress {
+        case "127.0.0.1": return "localhost"
+        case "0.0.0.0": return primaryLANIPv4() ?? "localhost"
+        default: return server.settings.bindAddress
+        }
+    }
+
+    /// Best-effort primary LAN IPv4 (wifi/ethernet), skipping loopback and the
+    /// container bridge subnet (192.168.64.x). Returns nil if none is found.
+    private func primaryLANIPv4() -> String? {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
+        defer { freeifaddrs(ifaddr) }
+        var preferred: String?
+        var fallback: String?
+        for cursor in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let iface = cursor.pointee
+            guard let addrPtr = iface.ifa_addr, addrPtr.pointee.sa_family == sa_family_t(AF_INET) else { continue }
+            let name = String(cString: iface.ifa_name)
+            if name == "lo0" { continue }
+            var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(addrPtr, socklen_t(addrPtr.pointee.sa_len),
+                               &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let ip = buf.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+            if ip.hasPrefix("192.168.64.") { continue }
+            if name.hasPrefix("en") { preferred = ip }
+            else if fallback == nil { fallback = ip }
+        }
+        return preferred ?? fallback
+    }
+
+    /// Master-detail strip under the log table: full params + full error for the
+    /// selected row, so neither is lost to the table's single-line truncation.
+    @ViewBuilder
+    private func logDetail(_ entry: MCPRequestLog.Entry) -> some View {
+        Divider()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(entry.toolName).font(.caption.weight(.semibold))
+                if let key = entry.keyName {
+                    Text("key: \(key)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(String(format: "%.0f ms", entry.duration * 1000))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if let params = entry.params {
+                Text("Parameters").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(params)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            }
+            if let err = entry.errorMessage {
+                Text("Error").font(.caption.weight(.semibold)).foregroundStyle(.red)
+                Text(err)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
         }
     }
 }
@@ -383,5 +439,70 @@ private struct NewKeySheet: View {
     private func submit() {
         onGenerate(name.trimmingCharacters(in: .whitespaces))
         dismiss()
+    }
+}
+
+/// Sheet showing a ready-to-paste `.mcp.json` client config (Claude Code shape)
+/// for one API key. The token is embedded inline in the Authorization header.
+private struct ExportConfigSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let key: MCPSettings.APIKey
+    let host: String
+    let port: Int
+    @State private var copied = false
+
+    private var configText: String {
+        let endpoint = "http://\(host):\(port)\(MCPConstants.endpoint)"
+        return """
+        {
+          "mcpServers": {
+            "icontainu": {
+              "type": "streamable-http",
+              "url": "\(endpoint)",
+              "headers": {
+                "Authorization": "Bearer \(key.key)"
+              }
+            }
+          }
+        }
+        """
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("MCP Client Config", systemImage: "doc.text")
+                .font(.headline)
+            Text("Paste this into your client's .mcp.json (Claude Code). The key is embedded in the Authorization header.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            ScrollView {
+                Text(configText)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .frame(maxHeight: 220)
+            HStack {
+                if copied {
+                    Label("Copied", systemImage: "checkmark")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(configText, forType: .string)
+                    copied = true
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
     }
 }

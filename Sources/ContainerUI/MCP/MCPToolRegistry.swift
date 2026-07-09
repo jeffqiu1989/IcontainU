@@ -1,6 +1,15 @@
 import Foundation
 import MCP
 
+/// Per-session mutable holder for the authenticated key name. MCPSessionManager
+/// sets it when a session is created; the CallTool handler reads it when
+/// recording a log entry. One holder per session, so there's no cross-session
+/// race on `keyName`.
+final class MCPKeyHolder: @unchecked Sendable {
+    var keyName: String?
+    init(_ keyName: String?) { self.keyName = keyName }
+}
+
 struct MCPToolRegistry: Sendable {
     let bridge: MCPModelBridge
     let requestLog: MCPRequestLog
@@ -14,13 +23,17 @@ struct MCPToolRegistry: Sendable {
             + ComposeTools.toolDefinitions()
     }
 
-    func registerHandlers(on server: Server) async {
+    func registerHandlers(on server: Server, keyHolder: MCPKeyHolder) async {
         await server.withMethodHandler(ListTools.self) { [self] _ in
             .init(tools: allTools())
         }
 
         await server.withMethodHandler(CallTool.self) { [self] params in
             let start = Date()
+            // Snapshot the key + params up front so the log entry is consistent
+            // even if the handler takes a while.
+            let keyName = keyHolder.keyName
+            let paramsJSON = Self.encodeParams(params.arguments)
             do {
                 let result = try await dispatch(name: params.name, arguments: params.arguments)
                 let duration = Date().timeIntervalSince(start)
@@ -33,7 +46,9 @@ struct MCPToolRegistry: Sendable {
                         tool: params.name,
                         duration: duration,
                         success: !toolFailed,
-                        error: toolFailed ? Self.firstText(result) : nil)
+                        error: toolFailed ? Self.firstText(result) : nil,
+                        keyName: keyName,
+                        params: paramsJSON)
                 }
                 return result
             } catch {
@@ -43,7 +58,7 @@ struct MCPToolRegistry: Sendable {
                 // pollute the log's error stats.
                 if error.isCancellation {
                     await MainActor.run {
-                        requestLog.record(tool: params.name, duration: duration, success: false, error: "Cancelled")
+                        requestLog.record(tool: params.name, duration: duration, success: false, error: "Cancelled", keyName: keyName, params: paramsJSON)
                     }
                     return .init(
                         content: [.text(text: "Cancelled", annotations: nil, _meta: nil)],
@@ -52,7 +67,7 @@ struct MCPToolRegistry: Sendable {
                 }
                 let errorMsg = error.localizedDescription
                 await MainActor.run {
-                    requestLog.record(tool: params.name, duration: duration, success: false, error: errorMsg)
+                    requestLog.record(tool: params.name, duration: duration, success: false, error: errorMsg, keyName: keyName, params: paramsJSON)
                 }
                 return .init(
                     content: [.text(text: "Error: \(errorMsg)", annotations: nil, _meta: nil)],
@@ -68,6 +83,18 @@ struct MCPToolRegistry: Sendable {
             if case .text(let text, _, _) = block { return text }
         }
         return nil
+    }
+
+    /// Serialize a tool call's arguments to a pretty-printed JSON string for the
+    /// request-log detail view. Nil for empty/nil args so the detail stays quiet
+    /// for no-arg tools (container_list, etc.).
+    private static func encodeParams(_ arguments: [String: Value]?) -> String? {
+        guard let arguments, !arguments.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(arguments),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        return json
     }
 
     private func dispatch(name: String, arguments: [String: Value]?) async throws -> CallTool.Result {

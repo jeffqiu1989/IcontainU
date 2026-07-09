@@ -14,6 +14,10 @@ final class MCPRequestLog {
         let duration: TimeInterval
         let success: Bool
         let errorMessage: String?
+        /// Which API key drove this request (nil = unauthenticated/unknown).
+        let keyName: String?
+        /// The tool call arguments, as a compact JSON string for the detail view.
+        let params: String?
 
         init(
             id: UUID = UUID(),
@@ -21,7 +25,9 @@ final class MCPRequestLog {
             timestamp: Date = Date(),
             duration: TimeInterval,
             success: Bool,
-            errorMessage: String? = nil
+            errorMessage: String? = nil,
+            keyName: String? = nil,
+            params: String? = nil
         ) {
             self.id = id
             self.toolName = toolName
@@ -29,15 +35,26 @@ final class MCPRequestLog {
             self.duration = duration
             self.success = success
             self.errorMessage = errorMessage
+            self.keyName = keyName
+            self.params = params
         }
     }
 
-    func record(tool: String, duration: TimeInterval, success: Bool, error: String? = nil) {
+    func record(
+        tool: String,
+        duration: TimeInterval,
+        success: Bool,
+        error: String? = nil,
+        keyName: String? = nil,
+        params: String? = nil
+    ) {
         let entry = Entry(
             toolName: tool,
             duration: duration,
             success: success,
-            errorMessage: error
+            errorMessage: error,
+            keyName: keyName,
+            params: params
         )
         entries.insert(entry, at: 0)
         if entries.count > maxEntries {

@@ -35,6 +35,9 @@ actor MCPSessionManager {
         let transport: StatefulHTTPServerTransport
         let createdAt: Date
         var lastAccessedAt: Date
+        /// Per-session key holder, shared with this session's CallTool handler so
+        /// the request log records which API key drove each call.
+        let keyHolder: MCPKeyHolder
     }
 
     /// Async factory. The reaper Task can't be started in init — init is
@@ -59,12 +62,14 @@ actor MCPSessionManager {
         self.bindAddress = bindAddress
     }
 
-    func handleRequest(_ request: HTTPRequest) async -> HTTPResponse {
+    func handleRequest(_ request: HTTPRequest, keyName: String?) async -> HTTPResponse {
         let sessionID = request.header(HTTPHeaderName.sessionID)
 
         // Route to existing session
         if let sessionID, var session = sessions[sessionID] {
             session.lastAccessedAt = Date()
+            // Keep the holder current in case the client rotated keys mid-session.
+            session.keyHolder.keyName = keyName
             sessions[sessionID] = session
 
             let response = await session.transport.handleRequest(request)
@@ -82,7 +87,7 @@ actor MCPSessionManager {
            let body = request.body,
            isInitializeRequest(body)
         {
-            return await createSessionAndHandle(request)
+            return await createSessionAndHandle(request, keyName: keyName)
         }
 
         // No session and not initialize
@@ -119,8 +124,9 @@ actor MCPSessionManager {
         return method == "initialize"
     }
 
-    private func createSessionAndHandle(_ request: HTTPRequest) async -> HTTPResponse {
+    private func createSessionAndHandle(_ request: HTTPRequest, keyName: String?) async -> HTTPResponse {
         let sessionID = UUID().uuidString
+        let keyHolder = MCPKeyHolder(keyName)
 
         let transport = StatefulHTTPServerTransport(
             sessionIDGenerator: FixedSessionIDGenerator(sessionID: sessionID),
@@ -135,14 +141,15 @@ actor MCPSessionManager {
                 version: "1.0.0",
                 capabilities: .init(tools: .init(listChanged: true))
             )
-            await toolRegistry.registerHandlers(on: server)
+            await toolRegistry.registerHandlers(on: server, keyHolder: keyHolder)
             try await server.start(transport: transport)
 
             sessions[sessionID] = SessionContext(
                 server: server,
                 transport: transport,
                 createdAt: Date(),
-                lastAccessedAt: Date()
+                lastAccessedAt: Date(),
+                keyHolder: keyHolder
             )
 
             let response = await transport.handleRequest(request)

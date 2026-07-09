@@ -284,8 +284,8 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             return
         }
         let token = String(auth.dropFirst(7))
-        let valid = await MainActor.run { settings.validateKey(token) }
-        guard valid else {
+        let keyName = await MainActor.run { settings.validateKey(token) }
+        guard let keyName else {
             writeErrorResponse(status: .unauthorized, body: "Invalid API key", version: head.version, context: context)
             return
         }
@@ -314,7 +314,7 @@ private final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             path: path
         )
 
-        let response = await sessionManager.handleRequest(httpRequest)
+        let response = await sessionManager.handleRequest(httpRequest, keyName: keyName)
         writeResponse(response, version: head.version, context: context)
     }
 

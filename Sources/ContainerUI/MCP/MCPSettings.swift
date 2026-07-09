@@ -51,19 +51,24 @@ final class MCPSettings {
         save()
     }
 
-    func validateKey(_ token: String) -> Bool {
+    /// Validate a bearer token, returning the matching key's name (or nil).
+    /// Returning the name (not just Bool) lets the MCP layer log which key drove
+    /// each request and power the per-key export button.
+    func validateKey(_ token: String) -> String? {
         // Reject empty/blank tokens outright (a stored empty key must never auth).
         let candidate = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty else { return false }
+        guard !candidate.isEmpty else { return nil }
         // Constant-time membership: check every key without early-return so the
-        // reply timing doesn't leak how many bytes of a key matched. `matched`
-        // is OR-accumulated across all keys instead of short-circuiting.
+        // reply timing doesn't leak how many bytes of a key matched. The name is
+        // captured only after a full-length, byte-exact match.
         let candidateBytes = Array(candidate.utf8)
-        var matched = false
+        var matchName: String?
         for apiKey in apiKeys {
-            matched = Self.constantTimeEqual(candidateBytes, Array(apiKey.key.utf8)) || matched
+            if Self.constantTimeEqual(candidateBytes, Array(apiKey.key.utf8)) {
+                matchName = apiKey.name
+            }
         }
-        return matched
+        return matchName
     }
 
     /// Length-independent constant-time byte compare. A length mismatch always
