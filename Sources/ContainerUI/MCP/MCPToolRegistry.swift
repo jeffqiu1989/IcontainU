@@ -87,14 +87,14 @@ struct MCPToolRegistry: Sendable {
     }
 
     /// Serialize a tool call's arguments to a readable YAML string for the
-    /// request-log detail popover. YAML renders multi-line strings as block
-    /// scalars (real newlines, not escaped `\n`), leaves `/` unescaped, and uses
-    /// `-` for arrays - readable, unlike JSONEncoder's escaped output. Nil for
-    /// empty/nil args so the detail stays quiet for no-arg tools.
+    /// request-log detail sheet. `newLineScalarStyle: .literal` forces
+    /// multi-line strings (e.g. a compose yaml arg) into `|` block scalars with
+    /// real newlines instead of the default double-quoted form that escapes them
+    /// as `\n`. `/` stays unescaped, arrays use `-`. Nil for empty/nil args.
     private static func encodeParams(_ arguments: [String: Value]?) -> String? {
         guard let arguments, !arguments.isEmpty else { return nil }
         let any: [String: Any] = arguments.mapValues(Self.valueToAny)
-        return try? Yams.dump(object: any, sortKeys: true)
+        return try? Yams.dump(object: any, sortKeys: true, newLineScalarStyle: .literal)
     }
 
     /// Recursively convert an MCP `Value` to a Yams-encodable `Any`.
