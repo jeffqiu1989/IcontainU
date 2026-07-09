@@ -156,4 +156,39 @@ struct EnvInterpolatorTests {
         #expect(r.text == "value=resolved")
         #expect(r.warnings.isEmpty)
     }
+
+    // MARK: - PWD
+
+    /// `${PWD}` resolves to the compose file's directory, not the host process's
+    /// PWD (which is `/` for a GUI app launched from Finder). A `.env`-defined
+    /// `PWD` still wins, matching docker compose's env-overrides-shell order.
+    @Test func pwdResolvesToBaseDirectory() throws {
+        let dir = try makeEnvDir("")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let r = try EnvInterpolator.interpolate(yaml: "v=${PWD}/data", baseDirectory: dir)
+        #expect(r.text == "v=\(dir.path)/data")
+        #expect(r.warnings.isEmpty)
+    }
+
+    @Test func pwdBareFormAlsoResolves() throws {
+        let dir = try makeEnvDir("")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let r = try EnvInterpolator.interpolate(yaml: "v=$PWD/data", baseDirectory: dir)
+        #expect(r.text == "v=\(dir.path)/data")
+    }
+
+    @Test func dotEnvCanOverridePwd() throws {
+        let dir = try makeEnvDir("PWD=/custom\n")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let r = try EnvInterpolator.interpolate(yaml: "v=${PWD}", baseDirectory: dir)
+        #expect(r.text == "v=/custom")
+    }
+
+    @Test func pwdNilBaseDirectoryFallsBackToHostEnv() throws {
+        // No baseDirectory: keep docker compose's shell-PWD behaviour (host env).
+        // No assertion on the exact value - just that it doesn't throw and the
+        // `${PWD}` token is consumed.
+        let r = try EnvInterpolator.interpolate(yaml: "v=${PWD}", baseDirectory: nil)
+        #expect(!r.text.contains("${PWD}"))
+    }
 }

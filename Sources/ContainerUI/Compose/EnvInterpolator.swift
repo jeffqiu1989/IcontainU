@@ -50,10 +50,16 @@ enum EnvInterpolator {
 
     // MARK: - Entry points
 
-    /// Host environment as base; `.env` overrides. This matches docker compose's
-    /// behaviour where `${PWD}` resolves from the shell even without a `.env` entry.
+    /// Host environment as base; `.env` overrides; `PWD` is pinned to the
+    /// compose file's directory. This matches docker compose's behaviour where
+    /// `${PWD}` is the directory `compose` runs in - for a GUI app launched from
+    /// Finder the process PWD is `/`, not the compose file's folder, so the host
+    /// `PWD` is meaningless and must be overridden from `baseDirectory`.
     static func interpolate(yaml: String, baseDirectory: URL?) throws -> Result {
         var variables = ProcessInfo.processInfo.environment
+        if let baseDirectory {
+            variables["PWD"] = baseDirectory.path
+        }
         for (key, value) in loadDotEnv(baseDirectory: baseDirectory) {
             variables[key] = value
         }
