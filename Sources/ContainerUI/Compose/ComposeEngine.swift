@@ -187,7 +187,7 @@ enum ComposeEngine {
     private static func injectHostsIncremental(
         project: String, client: ContainerClient, startedService: String
     ) async {
-        for attempt in 0..<6 {
+        for _ in 0..<6 {
             guard let all = try? await client.list(filters: ContainerListFilters.all.withoutMachines()) else {
                 try? await Task.sleep(for: .seconds(1))
                 continue
