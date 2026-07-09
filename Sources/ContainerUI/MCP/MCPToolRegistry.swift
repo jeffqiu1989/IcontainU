@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import Yams
 
 /// Per-session mutable holder for the authenticated key name. MCPSessionManager
 /// sets it when a session is created; the CallTool handler reads it when
@@ -86,31 +85,79 @@ struct MCPToolRegistry: Sendable {
         return nil
     }
 
-    /// Serialize a tool call's arguments to a readable YAML string for the
-    /// request-log detail sheet. `newLineScalarStyle: .literal` forces
-    /// multi-line strings (e.g. a compose yaml arg) into `|` block scalars with
-    /// real newlines instead of the default double-quoted form that escapes them
-    /// as `\n`. `/` stays unescaped, arrays use `-`. Nil for empty/nil args.
+    /// Serialize a tool call's arguments to a readable YAML-like string for the
+    /// request-log detail sheet. Multi-line strings (e.g. a compose yaml arg)
+    /// render as `|` block scalars with real newlines; arrays use `-`; `/` is
+    /// left unescaped. Nil for empty/nil args so the detail stays quiet for
+    /// no-arg tools.
     private static func encodeParams(_ arguments: [String: Value]?) -> String? {
         guard let arguments, !arguments.isEmpty else { return nil }
-        let any: [String: Any] = arguments.mapValues(Self.valueToAny)
-        return try? Yams.dump(object: any, sortKeys: true, newLineScalarStyle: .literal)
+        var lines: [String] = []
+        for key in arguments.keys.sorted() {
+            renderValue(arguments[key]!, key: key, indent: "", into: &lines)
+        }
+        return lines.joined(separator: "\n")
     }
 
-    /// Recursively convert an MCP `Value` to a Yams-encodable `Any`.
-    private static func valueToAny(_ value: Value) -> Any {
+    /// Render one key/value pair (YAML-ish) into `lines`.
+    private static func renderValue(_ value: Value, key: String, indent: String, into lines: inout [String]) {
         switch value {
-        case .null: return NSNull()
-        case .bool(let b): return b
-        case .int(let i): return i
-        case .double(let d): return d
-        case .string(let s): return s
-        case .data(let mime, _): return "<data \(mime ?? "")>"
-        case .array(let arr): return arr.map(Self.valueToAny)
+        case .string(let s):
+            if s.contains("\n") {
+                lines.append("\(indent)\(key): |")
+                for line in s.split(separator: "\n", omittingEmptySubsequences: false) {
+                    lines.append("\(indent)  \(line)")
+                }
+            } else {
+                lines.append("\(indent)\(key): \(s)")
+            }
+        case .int(let i): lines.append("\(indent)\(key): \(i)")
+        case .double(let d): lines.append("\(indent)\(key): \(d)")
+        case .bool(let b): lines.append("\(indent)\(key): \(b)")
+        case .null: lines.append("\(indent)\(key): null")
+        case .data(let mime, _): lines.append("\(indent)\(key): <data \(mime ?? "")>")
+        case .array(let arr):
+            if arr.isEmpty { lines.append("\(indent)\(key): []") }
+            else {
+                lines.append("\(indent)\(key):")
+                for item in arr { renderItem(item, indent: indent + "  ", into: &lines) }
+            }
         case .object(let obj):
-            var d: [String: Any] = [:]
-            for (k, v) in obj { d[k] = Self.valueToAny(v) }
-            return d
+            if obj.isEmpty { lines.append("\(indent)\(key): {}") }
+            else {
+                lines.append("\(indent)\(key):")
+                for k in obj.keys.sorted() {
+                    renderValue(obj[k]!, key: k, indent: indent + "  ", into: &lines)
+                }
+            }
+        }
+    }
+
+    /// Render one array item (YAML-ish `- value`), with a block scalar for
+    /// multi-line strings.
+    private static func renderItem(_ value: Value, indent: String, into lines: inout [String]) {
+        switch value {
+        case .string(let s):
+            if s.contains("\n") {
+                lines.append("\(indent)- |")
+                for line in s.split(separator: "\n", omittingEmptySubsequences: false) {
+                    lines.append("\(indent)  \(line)")
+                }
+            } else {
+                lines.append("\(indent)- \(s)")
+            }
+        case .int(let i): lines.append("\(indent)- \(i)")
+        case .double(let d): lines.append("\(indent)- \(d)")
+        case .bool(let b): lines.append("\(indent)- \(b)")
+        case .null: lines.append("\(indent)- null")
+        case .data(let mime, _): lines.append("\(indent)- <data \(mime ?? "")>")
+        case .array(let arr):
+            lines.append("\(indent)- \(arr.map { String(describing: $0) }.joined(separator: ", "))")
+        case .object(let obj):
+            lines.append("\(indent)-")
+            for k in obj.keys.sorted() {
+                renderValue(obj[k]!, key: k, indent: indent + "  ", into: &lines)
+            }
         }
     }
 
