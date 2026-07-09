@@ -68,5 +68,6 @@ struct ContainerUIApp: App {
                 }
         }
         .windowResizability(.contentMinSize)
+        .defaultSize(width: 1200, height: 780)
     }
 }

@@ -21,15 +21,18 @@ struct ComposeProjectCard: View {
     let onServiceLogs: (String) -> Void
 
     @State private var hovering = false
+    /// Whether the service list is expanded past the collapsed preview limit.
+    @State private var servicesExpanded = false
+    /// Max services shown before collapsing into a "+N" badge. Keeps every card
+    /// the same height in the grid regardless of project size.
+    private static let collapsedServiceLimit = 3
 
     private var palette: CardPalette { CardPalette(color: Palette.compose) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            ForEach(project.services) { service in
-                serviceRow(service)
-            }
+            serviceList
             actions
         }
         .padding(14)
@@ -115,6 +118,39 @@ struct ComposeProjectCard: View {
                     .padding(.vertical, 4)
                     .background(Color.gray.opacity(0.12), in: Capsule())
             }
+        }
+    }
+
+    /// The service list, collapsed to `collapsedServiceLimit` rows with a "+N"
+    /// badge when the project has more. Click the badge to expand/collapse, so
+    /// every card stays the same height in the grid (mirrors ContainerCard's
+    /// network/port/mount overflow pattern).
+    @ViewBuilder
+    private var serviceList: some View {
+        let services = project.services
+        let limit = Self.collapsedServiceLimit
+        let visible = servicesExpanded ? services : Array(services.prefix(limit))
+        let overflow = services.count - limit
+        ForEach(visible) { service in
+            serviceRow(service)
+        }
+        if overflow > 0 {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { servicesExpanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: servicesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                    Text(servicesExpanded ? "Show less" : "+\(overflow) more")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(palette.accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(palette.tagFill, in: Capsule())
+            }
+            .buttonStyle(.borderless)
+            .help(servicesExpanded ? "Collapse" : "Show all \(services.count) services")
         }
     }
 
