@@ -280,18 +280,13 @@ struct MCPView: View {
                                         .foregroundColor(.accentColor)
                                         .underline()
                                         .onTapGesture { detailEntry = entry }
-                                        .popover(isPresented: Binding(
-                                            get: { detailEntry?.id == entry.id },
-                                            set: { if !$0 { detailEntry = nil } }
-                                        )) {
-                                            logDetailPopover(entry)
-                                        }
                                 }
                             }
                         }
                         .width(min: 140, ideal: 220)
                     }
                     .frame(minHeight: 160, idealHeight: 220)
+                    .sheet(item: $detailEntry) { logDetailSheet($0) }
                 }
             }
         }
@@ -384,44 +379,54 @@ struct MCPView: View {
         return preferred ?? fallback
     }
 
-    /// Popover content for a log row's "details" link: full params (YAML) +
-    /// full error, scrollable and selectable so neither is lost to the table's
-    /// single-line truncation.
+    /// Sheet content for a log row's "details" link: full params (YAML) + full
+    /// error, scrollable and selectable so neither is lost to the table's
+    /// single-line truncation. A sheet (not a popover) so long params/error
+    /// have room.
     @ViewBuilder
-    private func logDetailPopover(_ entry: MCPRequestLog.Entry) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(entry.toolName).font(.caption.weight(.semibold))
-                    if let key = entry.keyName {
-                        Text("key: \(key)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(String(format: "%.0f ms", entry.duration * 1000))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+    private func logDetailSheet(_ entry: MCPRequestLog.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Text(entry.toolName).font(.headline)
+                if let key = entry.keyName {
+                    Text("key: \(key)").font(.caption).foregroundStyle(.secondary)
                 }
-                if let params = entry.params {
-                    Text("Parameters").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Text(params)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let err = entry.errorMessage {
-                    if entry.params != nil { Divider() }
-                    Text("Error").font(.caption.weight(.semibold)).foregroundStyle(.red)
-                    Text(Self.normalizeLogText(err))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                Spacer()
+                Text(String(format: "%.0f ms", entry.duration * 1000))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Button("Done") { detailEntry = nil }
+                    .keyboardShortcut(.cancelAction)
             }
-            .padding(12)
-            .frame(maxWidth: 480)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let params = entry.params {
+                        Text("Parameters").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(params)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    if let err = entry.errorMessage {
+                        if entry.params != nil { Divider() }
+                        Text("Error").font(.caption.weight(.semibold)).foregroundStyle(.red)
+                        Text(Self.normalizeLogText(err))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(maxHeight: 360)
+        .padding(16)
+        .frame(minWidth: 520, idealWidth: 680, minHeight: 360, idealHeight: 520)
     }
 
     /// Normalize line endings in a log error string: CLI tools (redis-cli,
