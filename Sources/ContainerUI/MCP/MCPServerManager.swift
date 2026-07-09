@@ -85,8 +85,7 @@ final class MCPServerManager {
             volumes: volumesModel,
             networks: networksModel,
             compose: composeModel,
-            system: systemModel,
-            bindAddress: settings.bindAddress
+            system: systemModel
         )
 
         let manager = await MCPSessionManager.create(

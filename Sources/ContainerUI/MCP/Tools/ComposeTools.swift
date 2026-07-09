@@ -69,16 +69,13 @@ enum ComposeTools {
         let projectName = arguments?["projectName"]?.stringValue ?? "mcp-project"
         let wait = arguments?["wait"]?.intValue ?? 0
 
-        // When the server is remote-exposed (0.0.0.0), refuse host-path bind
-        // mounts: they'd let a remote client read arbitrary host files by
-        // mounting them into a container. Named volumes only. Local (127.0.0.1)
-        // is unrestricted.
-        if bridge.isRemote {
-            let binds = Self.hostBindMounts(in: yaml)
-            if !binds.isEmpty {
-                let list = binds.joined(separator: ", ")
-                return .init(content: [.text(text: "Host-path bind mounts are not allowed while the MCP server is bound to 0.0.0.0 (remote). Use named volumes, or bind to 127.0.0.1 for local use. Found: \(list)", annotations: nil, _meta: nil)], isError: true)
-            }
+        // MCP never allows host-path bind mounts (named volumes only): an agent
+        // driving the server shouldn't touch arbitrary host files. Use the app
+        // UI to bring up a project with a host bind mount.
+        let binds = Self.hostBindMounts(in: yaml)
+        if !binds.isEmpty {
+            let list = binds.joined(separator: ", ")
+            return .init(content: [.text(text: "Host-path bind mounts are not supported over MCP (named volumes only). Use the app's UI to mount a host directory. Found: \(list)", annotations: nil, _meta: nil)], isError: true)
         }
 
         // declaredNetworks/Volumes are left empty here — upAndWait re-parses the
