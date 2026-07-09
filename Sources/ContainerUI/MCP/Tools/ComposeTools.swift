@@ -69,6 +69,18 @@ enum ComposeTools {
         let projectName = arguments?["projectName"]?.stringValue ?? "mcp-project"
         let wait = arguments?["wait"]?.intValue ?? 0
 
+        // When the server is remote-exposed (0.0.0.0), refuse host-path bind
+        // mounts: they'd let a remote client read arbitrary host files by
+        // mounting them into a container. Named volumes only. Local (127.0.0.1)
+        // is unrestricted.
+        if bridge.isRemote {
+            let binds = Self.hostBindMounts(in: yaml)
+            if !binds.isEmpty {
+                let list = binds.joined(separator: ", ")
+                return .init(content: [.text(text: "Host-path bind mounts are not allowed while the MCP server is bound to 0.0.0.0 (remote). Use named volumes, or bind to 127.0.0.1 for local use. Found: \(list)", annotations: nil, _meta: nil)], isError: true)
+            }
+        }
+
         // declaredNetworks/Volumes are left empty here — upAndWait re-parses the
         // YAML and fills them so a later compose_down can reclaim the resources.
         let record = ComposeProjectRecord(
@@ -141,5 +153,26 @@ enum ComposeTools {
         }.joined(separator: "\n")
         let summary = "Project: \(project.name)\nRunning: \(project.runningCount)/\(project.totalCount)\n\n\(services)"
         return .init(content: [.text(text: summary, annotations: nil, _meta: nil)])
+    }
+
+    /// Return the short-syntax host-path bind mounts in the YAML (sources that
+    /// contain "/" or start with "~"). Anonymous volumes (`/data`, no colon) and
+    /// named volumes are skipped. Long-syntax volumes are already dropped by the
+    /// parser, so only short syntax is checked. Best-effort: if interpolation or
+    /// parsing fails, returns empty (the up path will surface the real error).
+    private static func hostBindMounts(in yaml: String) -> [String] {
+        guard let interpolated = try? EnvInterpolator.interpolate(yaml: yaml, baseDirectory: nil),
+              let file = try? ComposeParser.parse(yaml: interpolated.text) else { return [] }
+        var found: [String] = []
+        for service in file.services.values {
+            for vol in service.volumes {
+                guard vol.contains(":") else { continue }
+                let source = vol.split(separator: ":", maxSplits: 1).first.map(String.init) ?? vol
+                if source.contains("/") || source.hasPrefix("~") {
+                    found.append(vol)
+                }
+            }
+        }
+        return found
     }
 }

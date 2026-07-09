@@ -123,12 +123,22 @@ enum ContainerTools {
         guard let image = arguments?["image"]?.stringValue, !image.isEmpty else {
             return .init(content: [.text(text: "Missing required parameter: image", annotations: nil, _meta: nil)], isError: true)
         }
+        let volumes = arguments?["volumes"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        // Remote mode (0.0.0.0): refuse host-path bind mounts. Same rationale as
+        // compose_up - a remote client must not mount arbitrary host directories.
+        if bridge.isRemote {
+            let binds = Self.hostBindMountVolumes(volumes)
+            if !binds.isEmpty {
+                let list = binds.joined(separator: ", ")
+                return .init(content: [.text(text: "Host-path bind mounts are not allowed while the MCP server is bound to 0.0.0.0 (remote). Use named volumes, or bind to 127.0.0.1 for local use. Found: \(list)", annotations: nil, _meta: nil)], isError: true)
+            }
+        }
         let spec = ContainerCreateSpec(
             image: image,
             name: arguments?["name"]?.stringValue,
             command: arguments?["command"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             publishPorts: arguments?["ports"]?.arrayValue?.compactMap(\.stringValue) ?? [],
-            volumes: arguments?["volumes"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+            volumes: volumes,
             env: arguments?["env"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             networks: arguments?["networks"]?.arrayValue?.compactMap(\.stringValue) ?? []
         )
@@ -327,5 +337,16 @@ enum ContainerTools {
     private static func freshContainers(bridge: MCPModelBridge) async -> [ContainerSnapshot] {
         await bridge.containers.refresh()
         return await MainActor.run { bridge.containers.containers }
+    }
+
+    /// Filter a `volumes` arg to just the host-path bind mounts (sources that
+    /// contain "/" or start with "~"). Anonymous volumes (`/data`, no colon)
+    /// and named volumes (`myvol:/data`) are not bind mounts and pass through.
+    private static func hostBindMountVolumes(_ volumes: [String]) -> [String] {
+        volumes.filter { vol in
+            guard vol.contains(":") else { return false }
+            let source = vol.split(separator: ":", maxSplits: 1).first.map(String.init) ?? vol
+            return source.contains("/") || source.hasPrefix("~")
+        }
     }
 }
