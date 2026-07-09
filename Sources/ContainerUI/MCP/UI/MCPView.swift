@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Control panel for the embedded MCP server: enable/disable, bind config, API
 /// keys, and a live request log. Styled to match the app's other settings-style
@@ -49,13 +50,8 @@ struct MCPView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("MCP Server")
-                .font(.title2.weight(.semibold))
-            Text("Exposes IcontainU's containers, images, machines, volumes, networks, and Compose projects as tools over the Model Context Protocol, so an AI client like Claude Code can drive them. Requests are authenticated with an API key.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
+        Text("MCP Server")
+            .font(.title2.weight(.semibold))
     }
 
     // MARK: - Server card
@@ -108,10 +104,24 @@ struct MCPView: View {
                     Spacer(minLength: 0)
                 }
 
-                Text("Endpoint: http://\(server.settings.bindAddress):\(server.settings.port)\(MCPConstants.endpoint)")
+                Text(verbatim: "Endpoint: http://\(server.settings.bindAddress):\(server.settings.port)\(MCPConstants.endpoint)")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+
+                HStack {
+                    Button {
+                        exportConfig()
+                    } label: {
+                        Label("Export Config", systemImage: "square.and.arrow.up")
+                    }
+                    .controlSize(.small)
+                    .disabled(server.settings.apiKeys.isEmpty)
+                    .help(server.settings.apiKeys.isEmpty
+                          ? "Generate an API key first"
+                          : "Export a .mcp.json client config using the first API key")
+                    Spacer(minLength: 0)
+                }
             }
         }
     }
@@ -179,7 +189,7 @@ struct MCPView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(key.name)
                     .font(.callout.weight(.medium))
-                Text("Created \(key.createdAt.formatted(.relative(presentation: .named)))")
+                Text("Created \(key.createdAt.formatted(Date.RelativeFormatStyle(presentation: .named).locale(Locale(identifier: "en_US"))))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -307,6 +317,38 @@ struct MCPView: View {
         server.settings.bindAddress = address
         server.settings.save()
         Task { try? await server.restart() }
+    }
+
+    /// Export a `.mcp.json` client config (Claude Code / OpenCode shape) for the
+    /// first API key. When bound to 0.0.0.0 the connect target is rewritten to
+    /// 127.0.0.1 - a client on the same machine reaches localhost either way, and
+    /// 0.0.0.0 is not a valid connect destination. For LAN/remote use, edit the
+    /// exported file to point at the host's IP.
+    private func exportConfig() {
+        guard let key = server.settings.apiKeys.first else { return }
+        let host = server.settings.bindAddress == "0.0.0.0" ? "127.0.0.1" : server.settings.bindAddress
+        let endpoint = "http://\(host):\(server.settings.port)\(MCPConstants.endpoint)"
+        let config: [String: Any] = [
+            "mcpServers": [
+                "icontainu": [
+                    "url": endpoint,
+                    "headers": ["Authorization": "Bearer \(key.key)"],
+                ]
+            ]
+        ]
+        let panel = NSSavePanel()
+        panel.title = "Export MCP Config"
+        panel.nameFieldStringValue = ".mcp.json"
+        panel.allowedContentTypes = [UTType.json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url)
+        } catch {
+            // Best-effort: a failed write leaves the user at the save panel;
+            // there's no dedicated error surface on this view, so stay silent.
+        }
     }
 }
 
