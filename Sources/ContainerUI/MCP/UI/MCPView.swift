@@ -263,31 +263,33 @@ struct MCPView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .width(min: 60, ideal: 80)
-                        TableColumn("Error") { entry in
-                            Text(entry.errorMessage ?? "—")
-                                .font(.caption)
-                                .foregroundStyle(entry.errorMessage != nil ? .red : .secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        .width(min: 120, ideal: 200)
                         TableColumn("Details") { entry in
-                            if entry.params != nil || entry.errorMessage != nil {
-                                Text("details")
-                                    .foregroundColor(.accentColor)
-                                    .underline()
-                                    .onTapGesture { detailEntry = entry }
-                                    .popover(isPresented: Binding(
-                                        get: { detailEntry?.id == entry.id },
-                                        set: { if !$0 { detailEntry = nil } }
-                                    )) {
-                                        logDetailPopover(entry)
-                                    }
+                            if entry.params == nil && entry.errorMessage == nil {
+                                Text("-").font(.caption).foregroundStyle(.secondary)
                             } else {
-                                Text("-").foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if let err = entry.errorMessage {
+                                        Text(Self.normalizeLogText(err))
+                                            .font(.caption)
+                                            .foregroundStyle(.red)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                    }
+                                    Text("Details")
+                                        .font(.caption)
+                                        .foregroundColor(.accentColor)
+                                        .underline()
+                                        .onTapGesture { detailEntry = entry }
+                                        .popover(isPresented: Binding(
+                                            get: { detailEntry?.id == entry.id },
+                                            set: { if !$0 { detailEntry = nil } }
+                                        )) {
+                                            logDetailPopover(entry)
+                                        }
+                                }
                             }
                         }
-                        .width(60)
+                        .width(min: 140, ideal: 220)
                     }
                     .frame(minHeight: 160, idealHeight: 220)
                 }
@@ -407,8 +409,9 @@ struct MCPView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let err = entry.errorMessage {
+                    if entry.params != nil { Divider() }
                     Text("Error").font(.caption.weight(.semibold)).foregroundStyle(.red)
-                    Text(err)
+                    Text(Self.normalizeLogText(err))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
@@ -419,6 +422,13 @@ struct MCPView: View {
             .frame(maxWidth: 480)
         }
         .frame(maxHeight: 360)
+    }
+
+    /// Normalize line endings in a log error string: CLI tools (redis-cli,
+    /// kafka) emit CRLF, and a lone CR renders as a stray box. Collapse to \n.
+    private static func normalizeLogText(_ s: String) -> String {
+        s.replacingOccurrences(of: "\r\n", with: "\n")
+         .replacingOccurrences(of: "\r", with: "\n")
     }
 }
 
