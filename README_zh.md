@@ -159,6 +159,28 @@ Apple `container` 1.0.0 没有原生健康检查，因此 IcontainU 在 **Up 期
   通过 **Compose → New Project** 导入，修改密码和宿主机路径后 Up 即可。
 - **非 root 镜像在命名卷上需设 `user: "0"`**，否则写不了自己的数据目录。
 
+## Samples（示例项目）
+
+[`samples/`](samples/) 目录随 IcontainU 附带的 Compose 示例模板，可在 **Compose → New Project** 里导入后直接 Up。每一个都已在 IcontainU 上验证可运行。
+
+| 栈 | 服务 | 说明 |
+|---|------|------|
+| [postgresql-pgadmin](samples/postgresql-pgadmin/) | PostgreSQL + pgAdmin | `${VAR}` 占位模板——导入前编辑密码 |
+| [gitea-postgres](samples/gitea-postgres/) | Gitea + PostgreSQL | 命名卷，`restart: always` |
+| [nextcloud-postgres](samples/nextcloud-postgres/) | Nextcloud + PostgreSQL | |
+| [nextcloud-redis-mariadb](samples/nextcloud-redis-mariadb/) | Nextcloud + Redis + MariaDB | **多网络**示例（独立的 dbnet / redisnet） |
+| [wordpress-mysql](samples/wordpress-mysql/) | WordPress + MariaDB | |
+| [elasticsearch-logstash-kibana](samples/elasticsearch-logstash-kibana/) | ELK（ES 8 + Logstash + Kibana） | 完整 healthcheck + `depends_on: condition: service_healthy` |
+| [prometheus-grafana](samples/prometheus-grafana/) | Prometheus + Grafana | `user: "0"` 用于命名卷写；配置用 bind mount |
+| [postgres-healthcheck](samples/postgres-healthcheck/) | PostgreSQL + Alpine | 最小 healthcheck / `service_healthy` 示例 |
+| [kafka-cluster-kraft](samples/kafka-cluster-kraft/) | Kafka 4.3.1 KRaft（3 controller + 3 broker） | 主机名 advertised listeners；depends_on 启动 |
+| [redis-cluster](samples/redis-cluster/) | Redis 7 集群 | 3主3从，自动故障转移；`cluster-announce-hostname` + `/etc/hosts` 绕过 DNS |
+| [redis-cluster-envoy-proxy](samples/redis-cluster-envoy-proxy/) | Redis 集群 + Envoy 代理 | 在 `host:6379` 的 slot-aware Envoy 代理——纯 `redis-cli` 即可，无需 `-c` |
+| [`template-mysql.yaml`](samples/template-mysql.yaml) | MySQL 8（单服务） | 独立模板；数据目录 bind mount + `--datadir` 子目录（macOS chown 修复） |
+| [`template-postgres-17.yaml`](samples/template-postgres-17.yaml) | PostgreSQL 17（单服务） | 独立模板；`PGDATA` 子目录 bind mount（macOS chown 修复） |
+
+> **macOS bind mount 注意：**部分示例使用 bind 挂载的数据目录。macOS 上挂载根目录归宿主用户所有、不可 `chown`。需要在数据目录 `chown` 的镜像（MySQL、PostgreSQL ≤ 17）被指向**子目录**——模板已处理此问题。详见 [Compose 参考](#compose-参考)。
+
 ## MCP server
 
 IcontainU 内置的 [Model Context Protocol](https://modelcontextprotocol.io) server，让 AI 客户端（Claude Code、OpenCode 等）通过 MCP 协议远程操作容器、镜像、虚拟机、存储卷、网络和 Compose 项目——适合从 Claude Code 发起的「拉起这个栈并确认健康」这类工作流。

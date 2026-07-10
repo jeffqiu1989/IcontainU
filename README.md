@@ -205,6 +205,28 @@ Apple `container` 1.0.0 has no native healthcheck, so IcontainU runs the probe v
   Import via **Compose → New Project**, edit the password and host path, then Up.
 - **Non‑root images need `user: "0"` on a named volume**, otherwise they can't write their data dir.
 
+## Samples
+
+The [`samples/`](samples/) directory ships Compose templates you can import via **Compose → New Project** and Up directly. Each one is verified to run on IcontainU.
+
+| Stack | Services | Notes |
+|---|---|---|
+| [postgresql-pgadmin](samples/postgresql-pgadmin/) | PostgreSQL + pgAdmin | `${VAR}` placeholder template — edit passwords before import |
+| [gitea-postgres](samples/gitea-postgres/) | Gitea + PostgreSQL | Named volumes, `restart: always` |
+| [nextcloud-postgres](samples/nextcloud-postgres/) | Nextcloud + PostgreSQL | |
+| [nextcloud-redis-mariadb](samples/nextcloud-redis-mariadb/) | Nextcloud + Redis + MariaDB | **Multi-network** demo (separate dbnet / redisnet) |
+| [wordpress-mysql](samples/wordpress-mysql/) | WordPress + MariaDB | |
+| [elasticsearch-logstash-kibana](samples/elasticsearch-logstash-kibana/) | ELK stack (ES 8 + Logstash + Kibana) | Full `healthcheck` + `depends_on: condition: service_healthy` |
+| [prometheus-grafana](samples/prometheus-grafana/) | Prometheus + Grafana | `user: "0"` for named-volume write; bind mounts for config |
+| [postgres-healthcheck](samples/postgres-healthcheck/) | PostgreSQL + Alpine | Minimal healthcheck / `service_healthy` demo |
+| [kafka-cluster-kraft](samples/kafka-cluster-kraft/) | Kafka 4.3.1 KRaft (3 controllers + 3 brokers) | Advertised listeners on hostnames; depends_on startup |
+| [redis-cluster](samples/redis-cluster/) | Redis 7 cluster | 3-master / 3-replica with auto-failover; `cluster-announce-hostname` + `/etc/hosts` DNS workaround |
+| [redis-cluster-envoy-proxy](samples/redis-cluster-envoy-proxy/) | Redis cluster + Envoy proxy | Slot-aware Envoy proxy at `host:6379` — plain `redis-cli`, no `-c` flag needed |
+| [`template-mysql.yaml`](samples/template-mysql.yaml) | MySQL 8 (single) | Standalone template; bind-mount data dir with `--datadir` subdirectory (macOS chown fix) |
+| [`template-postgres-17.yaml`](samples/template-postgres-17.yaml) | PostgreSQL 17 (single) | Standalone template; `PGDATA` subdirectory bind-mount (macOS chown fix) |
+
+> **macOS bind-mount note:** some samples use bind-mounted data directories. On macOS the mount root is owned by the host user and can't be `chown`'d. Images that need `chown` on their data dir (MySQL, PostgreSQL ≤ 17) are pointed at a **subdirectory** via `--datadir` / `PGDATA` — the templates already handle this. See the [Compose reference](#compose-reference) for details.
+
 ## License & acknowledgements
 
 Licensed under the Apache License 2.0 — see [LICENSE](LICENSE). Built on Apple's `container` and `containerization`; see [NOTICE](NOTICE) for attribution.
