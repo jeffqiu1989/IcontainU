@@ -1,320 +1,399 @@
-# IcontainU MCP Server 接口文档
+# IcontainU MCP Server
 
-IcontainU 内置的 MCP (Model Context Protocol) Server，让远程 AI 客户端（Claude Code、OpenCode 等）通过 MCP 协议操作容器、镜像、虚拟机、存储卷、网络和 Compose 项目。
+IcontainU ships a built-in MCP (Model Context Protocol) server so a remote AI client (Claude Code, OpenCode, and other MCP clients) can operate containers, images, machines, volumes, networks, and Compose projects over MCP.
 
-## 概述
+## Overview
 
-| 项目 | 说明 |
-|------|------|
-| 协议 | MCP over Streamable HTTP (`StatefulHTTPServerTransport`) |
-| 传输 | swift-nio HTTP server（非 Hummingbird） |
-| 端点 | `/mcp` |
-| 认证 | Bearer API Key，在 NIO handler 中校验 |
-| 配置存储 | UserDefaults (`mcpSettings`) |
-| Session 超时 | 3600 秒（由 `MCPSessionManager` 后台 reaper 驱逐） |
-| 请求体限制 | 1 MB |
-| 默认端口 | 3000 |
-| 默认绑定地址 | `127.0.0.1` |
+| Item | Detail |
+|------|--------|
+| Protocol | MCP over Streamable HTTP (`StatefulHTTPServerTransport`) |
+| Transport | swift-nio HTTP server (not Hummingbird) |
+| Endpoint | `/mcp` |
+| Auth | Bearer API key, validated in the NIO handler |
+| Config storage | UserDefaults (`mcpSettings`) |
+| Session timeout | 3600 s (idle sessions reaped by `MCPSessionManager`) |
+| Request body limit | 1 MB |
+| Default port | 3000 |
+| Default bind | `127.0.0.1` |
 
-## 配置
+## Configuration
 
-MCP Server 嵌入主 App，在 **MCPView** 界面手动开关和配置。
+MCP Server is embedded in the main app and toggled/configured manually from the **MCP** panel.
 
 ### MCPSettings
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `isEnabled` | Bool | `false` | 是否启用 MCP Server |
-| `port` | Int | `3000` | 监听端口 |
-| `bindAddress` | String | `"127.0.0.1"` | 绑定地址（`0.0.0.0` 表示所有接口） |
-| `apiKeys` | `[APIKey]` | `[]` | API Key 列表 |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `isEnabled` | Bool | `false` | Whether the MCP server is running |
+| `port` | Int | `3000` | Listen port |
+| `bindAddress` | String | `"127.0.0.1"` | Bind address (`0.0.0.0` = all interfaces) |
+| `apiKeys` | `[APIKey]` | `[]` | API key list |
 
-### API Key 管理
+### API key management
 
-- **生成 Key**：`generateKey(name:)` — 生成 32 字节随机 hex key（格式如 `mc-xxxxxxxx...`），保存到 UserDefaults
-- **删除 Key**：`deleteKey(id:)`
-- **校验 Key**：`validateKey(_:)` — 比较传入的 Bearer token 是否匹配任一已存 Key
+- **Generate key**: `generateKey(name:)` — 32-byte random hex key, saved to UserDefaults
+- **Delete key**: `deleteKey(id:)`
+- **Validate key**: `validateKey(_:)` — constant-time comparison of the incoming Bearer token against stored keys
 
-### 绑定说明
+### Client configuration
 
-- `127.0.0.1`：仅本机访问，使用默认 `OriginValidator`（localhost）
-- `0.0.0.0`：所有接口访问，使用 `OriginValidator.disabled`（否则 localhost validator 会拒绝非 localhost Host）
-- 端口或绑定地址变更后需调用 `restart()`（= stop + start）
-
----
-
-## Tools 列表
-
-共 **19** 个 Tool，分 6 个资源组。
-
-### 1. Container（容器）— 5 个
-
-#### `container_list`
-列出所有容器及其状态、镜像、网络信息。
-
-| 属性 | 值 |
-|------|-----|
-| 参数 | 无 |
-| 只读 | 是 |
-| 返回示例 | `[Running] abc123 — nginx:latest (networks: docker0)` |
-
-#### `container_create`
-创建并启动一个新容器。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `image` | String | **是** | 镜像引用，如 `nginx:latest` |
-| `name` | String | 否 | 容器名（为空则自动生成） |
-| `command` | `[String]` | 否 | 命令参数 |
-| `ports` | `[String]` | 否 | 端口映射，如 `["8080:80"]` |
-| `volumes` | `[String]` | 否 | 卷挂载，如 `["/host:/data"]` |
-| `env` | `[String]` | 否 | 环境变量，如 `["KEY=VALUE"]` |
-| `networks` | `[String]` | 否 | 要附加的网络名 |
-| 可逆 | 否 | 幂等 | 否 |
-
-#### `container_start`
-启动一个已停止的容器。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 容器 ID 或名称 |
-| 可逆 | 否 | 幂等 | 是 |
-
-#### `container_stop`
-停止一个运行中的容器。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 容器 ID 或名称 |
-| 可逆 | 否 | 幂等 | 是 |
-
-#### `container_delete`
-删除一个容器。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 容器 ID 或名称 |
-| `force` | Boolean | 否 | 是否强制删除（容器运行中时） |
-| 可逆 | **是（破坏性）** | 幂等 | 是 |
-
----
-
-### 2. Image（镜像）— 3 个
-
-#### `image_list`
-列出所有容器镜像及其引用和大小。
-
-| 属性 | 值 |
-|------|-----|
-| 参数 | 无 |
-| 只读 | 是 |
-
-#### `image_pull`
-从注册表拉取镜像。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `reference` | String | **是** | 镜像引用，如 `nginx:latest` 或 `ubuntu:22.04` |
-| 可逆 | 否 | 幂等 | 是 |
-
-#### `image_delete`
-删除一个镜像。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 镜像 ID 或引用（支持名称匹配） |
-| 可逆 | **是（破坏性）** | 幂等 | 是 |
-
----
-
-### 3. Machine（虚拟机）— 3 个
-
-#### `machine_list`
-列出所有虚拟机及其状态和配置。
-
-| 属性 | 值 |
-|------|-----|
-| 参数 | 无 |
-| 只读 | 是 |
-| 返回示例 | `[Running] vm1 — 192.168.64.10` |
-
-#### `machine_boot`
-启动一个已停止的虚拟机。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 虚拟机 ID |
-| 可逆 | 否 | 幂等 | 是 |
-
-#### `machine_stop`
-停止一个运行中的虚拟机。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 虚拟机 ID |
-| 可逆 | 否 | 幂等 | 是 |
-
-#### `machine_delete`
-删除一个虚拟机。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 虚拟机 ID |
-| 可逆 | **是（破坏性）** | 幂等 | 是 |
-
----
-
-### 4. Volume（存储卷）— 3 个
-
-#### `volume_list`
-列出所有存储卷及其名称和大小。
-
-| 属性 | 值 |
-|------|-----|
-| 参数 | 无 |
-| 只读 | 是 |
-
-#### `volume_create`
-创建一个新的存储卷。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `name` | String | **是** | 卷名 |
-| `size` | String | 否 | 卷大小，如 `"10G"`（为空则使用服务器默认） |
-| 可逆 | 否 | 幂等 | 否 |
-
-#### `volume_delete`
-删除一个存储卷。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `name` | String | **是** | 卷名 |
-| 可逆 | **是（破坏性）** | 幂等 | 是 |
-
----
-
-### 5. Network（网络）— 3 个
-
-#### `network_list`
-列出所有网络及其 ID、名称和模式。
-
-| 属性 | 值 |
-|------|-----|
-| 参数 | 无 |
-| 只读 | 是 |
-| 返回示例 | `net123 — my-net (NAT)` |
-
-#### `network_create`
-创建一个新网络。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `name` | String | **是** | 网络名 |
-| `hostOnly` | Boolean | 否 | 是否 Host-only 网络（无 NAT） |
-| `subnet` | String | 否 | IPv4 子网 CIDR，如 `"10.0.1.0/24"`（为空则自动分配） |
-| 可逆 | 否 | 幂等 | 否 |
-
-#### `network_delete`
-删除一个网络。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | String | **是** | 网络 ID |
-| 可逆 | **是（破坏性）** | 幂等 | 是 |
-
----
-
-### 6. Compose（Compose 项目）— 4 个
-
-#### `compose_list`
-列出所有 Compose 项目及其服务数和状态。
-
-| 属性 | 值 |
-|------|-----|
-| 参数 | 无 |
-| 只读 | 是 |
-| 返回示例 | `my-app — 2/3 running (stored: true)` |
-
-#### `compose_up`
-从 YAML 内容创建并启动一个 Compose 项目。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `yaml` | String | **是** | Compose YAML 内容 |
-| `projectName` | String | 否 | 项目名称（默认 `"mcp-project"`） |
-| 可逆 | 否 | 幂等 | 否 |
-
-> `upAndWait` 会重新解析 YAML 填充 `declaredNetworks/Volumes`，以便后续 `compose_down` 能回收资源。
-
-#### `compose_down`
-停止并删除一个 Compose 项目的所有容器。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `projectName` | String | **是** | 项目名称 |
-| `removeVolumes` | Boolean | 否 | 是否同时删除卷 |
-| `removeNetworks` | Boolean | 否 | 是否同时删除网络 |
-| 可逆 | **是（破坏性）** | 幂等 | 是 |
-
-#### `compose_status`
-获取 Compose 项目各服务的状态。
-
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `projectName` | String | **是** | 项目名称 |
-| 只读 | 是 |
-| 返回示例 | `Project: my-app\nRunning: 2/3\n\nweb: Running\napi: Running\ndb: Stopped` |
-
----
-
-## 调用示例
+After generating a key in the MCP panel, paste this into your client's `.mcp.json` (Claude Code). The server name in the config is **`containers`**:
 
 ```json
-// 调用 container_create
+{
+  "mcpServers": {
+    "containers": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-api-key>"
+      }
+    }
+  }
+}
+```
+
+### Binding notes
+
+- `127.0.0.1`: localhost only, uses the default `OriginValidator`
+- `0.0.0.0`: all interfaces, uses `OriginValidator.disabled` (otherwise the localhost validator rejects non-localhost Hosts)
+- After changing port or bind address, call `restart()` (= stop + start)
+
+---
+
+## Limitations (read first)
+
+MCP is a thin wrapper that fails gracefully — it is **not** feature-equivalent to the app. These come from real testing; know them before calling:
+
+- **No host-path bind mounts.** Any host-path mount in `container_create`'s `volumes` or `compose_up`'s YAML (e.g. `/host:/data`, Compose `type: bind`, or `- ./file:/target`) is rejected with an `isError` listing the offenders. **Named volumes only.** To mount a host directory, use the app UI.
+- **Compose does not resolve relative paths / `.env`.** `compose_up` receives raw YAML text with no baseDirectory, so:
+  - `.env` in the YAML's directory is **not loaded** (`${VAR}` interpolates to the empty string).
+  - `./relative` volume / config paths do not resolve. Use named volumes in the YAML, or Up from the app.
+- **`container_logs` is capped.** Defaults to the last `tail=200` lines; `tail=0` means all but is always capped at **256 KB** (only the last 256 KB of the file is seeked, avoiding loading multi-GB logs into memory).
+- **1 MB request body limit.** Requests over `maxRequestBodyBytes` (1 MB) are rejected — trim large compose YAML.
+- **Machines don't persist containers across stop/boot.** Stopping a machine that hosts containers drops those containers (not stopped, gone); re-Up after boot.
+- **No `machine_create`.** Machine creation (image preset, home mount, CPU/memory) is app-UI only; MCP doesn't expose it.
+- **No `build:` / `secrets:` / `configs:`.** Image builds, secrets, and config injection in Compose are unsupported (platform limits).
+- **`restart:` is parsed but not executed.** The restart key is recognized but no restart logic exists; services that crash on start may be reclaimed and leave no stopped record.
+- **Write operations can be briefly inconsistent.** State reads immediately after a mutation (up/create/delete) may lag; read-only tools (list/exec/logs/inspect) refresh before returning, writes do not.
+
+Destructive operations (delete / down) are marked **Reversible: yes (destructive)** below.
+
+---
+
+## Tools
+
+**25 tools** across 6 resource groups. All tool schemas live in `Sources/ContainerUI/MCP/Tools/*.swift`.
+
+### 1. Container — 8 tools
+
+#### `container_list`
+List all containers with their status, image, and network info.
+
+| Property | Value |
+|----------|-------|
+| Parameters | (none) |
+| Read-only | Yes |
+| Example | `[running] abc123 — docker.io/library/nginx:latest (networks: default)` |
+
+#### `container_create`
+Create and start a new container from an image.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `image` | String | **Yes** | Image reference, e.g. `nginx:latest` |
+| `name` | String | No | Container name (auto-generated if empty) |
+| `command` | `[String]` | No | Command arguments |
+| `ports` | `[String]` | No | Port mappings, e.g. `["8080:80"]` |
+| `volumes` | `[String]` | No | Volume mounts, e.g. `["myvol:/data"]` (**named volumes only; no host bind mounts**) |
+| `env` | `[String]` | No | Environment variables, e.g. `["KEY=VALUE"]` |
+| `networks` | `[String]` | No | Network names to attach |
+
+Reversible: no · Idempotent: no · Returns: `Container created: <id>`
+
+#### `container_start`
+Start a stopped container.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Container ID or name |
+
+Reversible: no · Idempotent: yes
+
+#### `container_stop`
+Stop a running container.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Container ID or name |
+
+Reversible: no · Idempotent: yes
+
+#### `container_delete`
+Delete a container.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Container ID or name |
+| `force` | Boolean | No | Force delete even if running |
+
+Reversible: yes (destructive) · Idempotent: yes
+
+#### `container_exec`
+Run a command inside a running container; returns stdout, stderr, and the exit code. **A non-zero exit is the command's result, not a tool error** (returned normally so the caller can judge).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Container ID or name |
+| `command` | String | **Yes** | Executable to run, e.g. `"redis-cli"` or `"sh"` |
+| `args` | `[String]` | No | Arguments to the command |
+| `user` | String | No | Run as this user |
+
+Read-only: no · Example: `exit=0\n--- stdout ---\nPONG`
+
+#### `container_logs`
+Fetch a container's logs. By default returns the workload stdout/stderr (`stdio.log`); `boot=true` returns the vminitd boot log.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Container ID or name |
+| `tail` | Integer | No | Lines to return from the end (default 200; `0` = all, capped at 256 KB) |
+| `boot` | Boolean | No | Return the vminitd boot log instead of workload logs |
+
+Read-only: yes
+
+#### `container_inspect`
+Show a container's detailed configuration and runtime state (image, status, networks/IPs, ports, command, labels, mounts, resources).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Container ID or name |
+
+Read-only: yes · Data from a cached snapshot (no exit code; stopped shown as n/a)
+
+---
+
+### 2. Image — 3 tools
+
+#### `image_list`
+List all container images with their references and sizes.
+
+| Property | Value |
+|----------|-------|
+| Parameters | (none) |
+| Read-only | Yes |
+
+#### `image_pull`
+Pull an image from a registry. Pulls only the host architecture, registry-mirror aware (transient errors auto-retry up to 3×; 403/401/404 translated to readable messages).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reference` | String | **Yes** | Image reference, e.g. `nginx:latest` or `ubuntu:22.04` |
+
+Reversible: no · Idempotent: yes
+
+#### `image_delete`
+Delete an image.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Image ID or reference (name matching supported) |
+
+Reversible: yes (destructive) · Idempotent: yes
+
+---
+
+### 3. Machine — 4 tools
+
+> No `machine_create`: machine creation is app-UI only (see [Limitations](#limitations-read-first)).
+
+#### `machine_list`
+List all machines with their status and IP.
+
+| Property | Value |
+|----------|-------|
+| Parameters | (none) |
+| Read-only | Yes |
+| Example | `[running] dev — 192.168.64.10` |
+
+#### `machine_boot`
+Boot a stopped machine.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Machine ID |
+
+Reversible: no · Idempotent: yes · Returns: `Machine <id> booted`
+
+#### `machine_stop`
+Stop a running machine. **Note**: drops containers on it (see Limitations).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Machine ID |
+
+Reversible: no · Idempotent: yes · Returns: `Machine <id> stopped`
+
+#### `machine_delete`
+Delete a machine.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Machine ID |
+
+Reversible: yes (destructive) · Idempotent: yes
+
+---
+
+### 4. Volume — 3 tools
+
+#### `volume_list`
+List all volumes with their name and size.
+
+| Property | Value |
+|----------|-------|
+| Parameters | (none) |
+| Read-only | Yes |
+
+#### `volume_create`
+Create a new volume.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | String | **Yes** | Volume name |
+| `size` | String | No | Size, e.g. `"10G"` (server default if empty) |
+
+Reversible: no · Idempotent: no · Returns: `Volume created: <name>`
+
+#### `volume_delete`
+Delete a volume.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | String | **Yes** | Volume name |
+
+Reversible: yes (destructive) · Idempotent: yes
+
+---
+
+### 5. Network — 3 tools
+
+#### `network_list`
+List all networks with their ID, name, and mode.
+
+| Property | Value |
+|----------|-------|
+| Parameters | (none) |
+| Read-only | Yes |
+| Example | `net123 — my-net (NAT)` |
+
+#### `network_create`
+Create a new network.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | String | **Yes** | Network name |
+| `hostOnly` | Boolean | No | Host-only network (no NAT) |
+| `subnet` | String | No | IPv4 CIDR subnet, e.g. `"10.0.1.0/24"` (auto-assigned if empty) |
+
+Reversible: no · Idempotent: no
+
+#### `network_delete`
+Delete a network.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | String | **Yes** | Network ID |
+
+Reversible: yes (destructive) · Idempotent: yes
+
+---
+
+### 6. Compose — 4 tools
+
+#### `compose_list`
+List all Compose projects with their status.
+
+| Property | Value |
+|----------|-------|
+| Parameters | (none) |
+| Read-only | Yes |
+| Example | `my-app — 2/3 running (stored: true)` |
+
+#### `compose_up`
+Create and start a Compose project from YAML. **Named volumes only; relative paths / `.env` not resolved** (see Limitations).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `yaml` | String | **Yes** | Compose YAML content |
+| `projectName` | String | No | Project name (default `"mcp-project"`) |
+| `wait` | Integer | No | Seconds to wait for services to exit. `0` (default) returns as soon as containers start; a one-shot/init service that exits within the window reports its exit code; a long-running server reports as running |
+
+Reversible: no · Idempotent: no
+
+> `upAndWait` re-parses the YAML to populate `declaredNetworks/Volumes` so a later `compose_down` can reclaim resources. A non-zero exit in any service marks the result `isError`.
+
+#### `compose_down`
+Stop and delete all containers of a Compose project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `projectName` | String | **Yes** | Project name |
+| `removeVolumes` | Boolean | No | Also delete volumes |
+| `removeNetworks` | Boolean | No | Also delete networks |
+
+Reversible: yes (destructive) · Idempotent: yes
+
+> Deletes containers and resources, **but not the project record** (`compose_list` still shows `stored: true, down`). To remove the record, use the Compose panel in the app.
+
+#### `compose_status`
+Get the per-service status of a Compose project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `projectName` | String | **Yes** | Project name |
+
+Read-only: yes · Example: `Project: my-app\nRunning: 2/3\n\nweb: running\napi: running\ndb: stopped (exit 0)`
+
+---
+
+## Usage examples
+
+```json
+// container_create (named volumes only)
 {
   "name": "container_create",
   "arguments": {
     "image": "nginx:latest",
     "name": "my-nginx",
     "ports": ["8080:80"],
+    "volumes": ["web-data:/usr/share/nginx/html"],
     "env": ["FOO=bar"]
   }
 }
 ```
 
 ```json
-// 调用 compose_up
+// container_exec
+{
+  "name": "container_exec",
+  "arguments": {
+    "id": "my-cache",
+    "command": "redis-cli",
+    "args": ["PING"]
+  }
+}
+```
+
+```json
+// compose_up (wait for init service exit, report exit code)
 {
   "name": "compose_up",
   "arguments": {
     "projectName": "my-app",
+    "wait": 10,
     "yaml": "services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\""
   }
 }
 ```
 
----
-
-## 内部架构
-
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| `MCPServerManager` | `MCPServerManager.swift` | 持有 `MultiThreadedEventLoopGroup`，管理 HTTP server 生命周期 |
-| `MCPHTTPHandler` | `MCPServerManager.swift` | NIO `ChannelInboundHandler`，认证 + 路由到 transport |
-| `MCPSessionManager` | `MCPSessionManager.swift` | Actor，管理 MCP session，后台 reaper 驱逐 idle session |
-| `MCPToolRegistry` | `MCPToolRegistry.swift` | 注册所有 Tool 定义和 handler 分发 |
-| `MCPModelBridge` | `MCPModelBridge.swift` | 桥接 MCP → 各 Model 的 throwing core 方法 |
-| `MCPRequestLog` | `MCPRequestLog.swift` | 请求日志（区分成功/失败/取消） |
-| `MCPConstants` | `MCPConstants.swift` | 默认端口、超时、端点等常量 |
-
-### 错误处理
-
-- Tool handler 通过 `try await` 调用 throwing core 方法
-- 失败返回 `isError: true` 的 `CallTool.Result`
-- 区分 cancellation（客户端主动取消）和普通错误：cancellation 不污染日志的错误统计
-- 校验错误通过 `OperationError`（可 throw）传递
-
-### 后续可扩展
-
-- 按 Key 调用统计、rate limiting、只读模式
-- `image_inspect`（plan 中列出但未实现）
