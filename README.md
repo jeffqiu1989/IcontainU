@@ -30,7 +30,7 @@ Two things make IcontainU worth your dock:
 - **🃏 Everything on a card** — Start / Stop / Shell / Logs / Delete per container, plus a live **stats** tab and streaming logs.
 - **✨ Friction removers** — tap to copy an IP or `ip:port`, tap a mount to open it in Finder, local‑image autocomplete, and Docker‑style auto‑naming.
 - **🚀 Frictionless setup** — first launch auto‑installs the kernel and monitors `container` health for you.
-- **🤖 MCP server** - a built-in [Model Context Protocol](https://modelcontextprotocol.io) server exposes every container, image, machine, volume, network, and Compose operation as a tool, so Claude Code, OpenCode, or any MCP client can drive IcontainU remotely over HTTP with a Bearer API key. See [docs/MCP.md](docs/MCP.md) for the full 19-tool API.
+- **🤖 MCP server** - a built-in [Model Context Protocol](https://modelcontextprotocol.io) server exposes every container, image, machine, volume, network, and Compose operation as a tool, so Claude Code, OpenCode, or any MCP client can drive IcontainU remotely over HTTP with a Bearer API key. See [docs/mcp_server.md](docs/mcp_server.md) for the full 25-tool API.
 
 ## Screenshots
 
@@ -42,9 +42,9 @@ Two things make IcontainU worth your dock:
 | --- | --- |
 | ![Create a machine](docs/screenshots/Create_Machine.png) | ![Images](docs/screenshots/Images.png) |
 
-| Registry mirrors | DaoCloud one-click preset |
+| Registry mirrors | Built-in MCP server |
 | --- | --- |
-| ![Registry mirrors](docs/screenshots/Mirrors.png) | ![DaoCloud preset](docs/screenshots/Mirrors_DaoCloud.png) |
+| ![Registry mirrors](docs/screenshots/Mirrors.png) | ![Built-in MCP server](docs/screenshots/Mcp_server.png) |
 
 ## Requirements
 
@@ -87,16 +87,26 @@ IcontainU ships an embedded [Model Context Protocol](https://modelcontextprotoco
 - **Transport**: MCP over Streamable HTTP at `/mcp` (swift-nio server, default port `3000`).
 - **Auth**: Bearer API key, generated and managed in the in-app **MCP** panel. Constant-time comparison; no key, no access.
 - **Bind**: `127.0.0.1` (localhost only) by default; switch to `0.0.0.0` in the panel to reach it from the LAN.
-- **Tools**: 19 tools across 6 resource groups - `container_list/create/start/stop/delete/exec/logs/inspect`, `image_list/pull`, `machine_list/boot/stop/delete`, `network_list/create/delete`, `volume_list/create/delete`, and `compose_list/status/up/down`.
 
-Full tool schemas, parameters, and examples: [docs/MCP.md](docs/MCP.md).
+**25 tools** across 6 resource groups:
+
+| Resource | Tools |
+| --- | --- |
+| Container | `list`, `create`, `start`, `stop`, `delete`, `exec`, `logs`, `inspect` |
+| Image | `list`, `pull`, `delete` |
+| Machine | `list`, `boot`, `stop`, `delete` |
+| Volume | `list`, `create`, `delete` |
+| Network | `list`, `create`, `delete` |
+| Compose | `list`, `up`, `down`, `status` |
+
+Full tool schemas, parameters, and examples: [docs/mcp_server.md](docs/mcp_server.md).
 
 Quick start from a client config (`.mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "icontainu": {
+    "containers": {
       "url": "http://127.0.0.1:3000/mcp",
       "headers": { "Authorization": "Bearer <your-api-key>" }
     }

@@ -30,6 +30,7 @@
 - **🃏 卡片式管理** —— 每个容器卡片都有 启动 / 停止 / Shell / 日志 / 删除，外加实时 **Stats** 与流式日志。
 - **✨ 消除摩擦** —— 点击复制 IP 或 `ip:port`，点击挂载在 Finder 打开，本地镜像自动补全，Docker 风格自动命名。
 - **🚀 无摩擦初始化** —— 首次启动自动安装 kernel，并持续监控 `container` 健康状态。
+- **🤖 MCP server** —— 内置 [Model Context Protocol](https://modelcontextprotocol.io) server，暴露 25 个工具供 Claude Code、OpenCode 等 MCP 客户端通过 HTTP 远程操控容器、镜像、虚拟机、卷、网络和 Compose 项目（Bearer API Key 鉴权）。详见 [docs/mcp_server.md](docs/mcp_server.md)。
 
 ## 截图
 
@@ -41,9 +42,10 @@
 | --- | --- |
 | ![Create a machine](docs/screenshots/Create_Machine.png) | ![Images](docs/screenshots/Images.png) |
 
-| 镜像加速 | DaoCloud 一键预设 |
+| 镜像加速 | 内置 MCP server |
 | --- | --- |
-| ![Registry mirrors](docs/screenshots/Mirrors.png) | ![DaoCloud preset](docs/screenshots/Mirrors_DaoCloud.png) |
+| ![Registry mirrors](docs/screenshots/Mirrors.png) | ![Built-in MCP server](docs/screenshots/Mcp_server.png) |
+
 
 ## 环境要求
 
@@ -156,6 +158,51 @@ Apple `container` 1.0.0 没有原生健康检查，因此 IcontainU 在 **Up 期
 
   通过 **Compose → New Project** 导入，修改密码和宿主机路径后 Up 即可。
 - **非 root 镜像在命名卷上需设 `user: "0"`**，否则写不了自己的数据目录。
+
+## MCP server
+
+IcontainU 内置的 [Model Context Protocol](https://modelcontextprotocol.io) server，让 AI 客户端（Claude Code、OpenCode 等）通过 MCP 协议远程操作容器、镜像、虚拟机、存储卷、网络和 Compose 项目——适合从 Claude Code 发起的「拉起这个栈并确认健康」这类工作流。
+
+- **传输**：MCP over Streamable HTTP，端点 `/mcp`（swift-nio，默认端口 `3000`）。
+- **鉴权**：Bearer API Key，在 App 内 **MCP** 面板生成管理。常量时间比较，无 Key 无访问。
+- **绑定**：默认 `127.0.0.1`（仅本机）；在面板里切到 `0.0.0.0` 可从局域网访问。
+
+**25 个工具**，分 6 个资源组：
+
+| 资源组 | 工具 |
+| --- | --- |
+| Container（容器） | `list`, `create`, `start`, `stop`, `delete`, `exec`, `logs`, `inspect` |
+| Image（镜像） | `list`, `pull`, `delete` |
+| Machine（虚拟机） | `list`, `boot`, `stop`, `delete` |
+| Volume（存储卷） | `list`, `create`, `delete` |
+| Network（网络） | `list`, `create`, `delete` |
+| Compose | `list`, `up`, `down`, `status` |
+
+完整的 tool schema、参数与示例：[docs/mcp_server.md](docs/mcp_server.md)。
+
+客户端配置（`.mcp.json`，配置里 server 名叫 `containers`）：
+
+```json
+{
+  "mcpServers": {
+    "containers": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-api-key>"
+      }
+    }
+  }
+}
+```
+
+**主要限制**：
+- 不支持 host bind mount（宿主机路径挂载）——只允许命名卷。
+- Compose 不解析相对路径 / `.env`。
+- `container_logs` 默认 tail 200 行，受 256 KB 上限约束。
+- 请求体 1 MB 上限。
+- 无 `machine_create`（只在 App UI 里做）。
+- 详细限制见 [docs/mcp_server.md](docs/mcp_server.md)。
 
 ## 许可证与致谢
 

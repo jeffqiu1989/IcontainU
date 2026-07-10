@@ -485,7 +485,7 @@ private struct ExportConfigSheet: View {
         return """
         {
           "mcpServers": {
-            "icontainu": {
+            "containers": {
               "type": "streamable-http",
               "url": "\(endpoint)",
               "headers": {
