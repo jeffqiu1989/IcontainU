@@ -2,8 +2,8 @@
 import PackageDescription
 
 // Must match the containerization version pinned by the `container` release below
-// (the 1.0.0 tag pins 0.33.3).
-let scVersion = "0.33.3"
+// (the 1.1.0 tag pins 0.35.0).
+let scVersion = "0.35.0"
 
 let package = Package(
     name: "IcontainU",
@@ -12,7 +12,7 @@ let package = Package(
         .executable(name: "IcontainU", targets: ["ContainerUI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/container.git", exact: "1.0.0"),
+        .package(url: "https://github.com/apple/container.git", exact: "1.1.0"),
         .package(url: "https://github.com/apple/containerization.git", exact: Version(stringLiteral: scVersion)),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
         // YAML parsing for the Compose feature. Already present transitively via the
