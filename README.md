@@ -80,39 +80,6 @@ swift build && swift run IcontainU
 ./scripts/package-app.sh
 ```
 
-## MCP server
-
-IcontainU ships an embedded [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI client can operate containers, images, machines, volumes, networks, and Compose projects on your behalf - useful for "bring this stack up and verify it's healthy" workflows driven from Claude Code, OpenCode, or any MCP-compatible client.
-
-- **Transport**: MCP over Streamable HTTP at `/mcp` (swift-nio server, default port `3000`).
-- **Auth**: Bearer API key, generated and managed in the in-app **MCP** panel. Constant-time comparison; no key, no access.
-- **Bind**: `127.0.0.1` (localhost only) by default; switch to `0.0.0.0` in the panel to reach it from the LAN.
-
-**25 tools** across 6 resource groups:
-
-| Resource | Tools |
-| --- | --- |
-| Container | `list`, `create`, `start`, `stop`, `delete`, `exec`, `logs`, `inspect` |
-| Image | `list`, `pull`, `delete` |
-| Machine | `list`, `boot`, `stop`, `delete` |
-| Volume | `list`, `create`, `delete` |
-| Network | `list`, `create`, `delete` |
-| Compose | `list`, `up`, `down`, `status` |
-
-Full tool schemas, parameters, and examples: [docs/mcp_server.md](docs/mcp_server.md).
-
-Quick start from a client config (`.mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "containers": {
-      "url": "http://127.0.0.1:3000/mcp",
-      "headers": { "Authorization": "Bearer <your-api-key>" }
-    }
-  }
-}
-```
 
 ## Status & known limitations
 
@@ -227,6 +194,39 @@ The [`samples/`](samples/) directory ships Compose templates you can import via 
 
 > **macOS bind-mount note:** some samples use bind-mounted data directories. On macOS the mount root is owned by the host user and can't be `chown`'d. Images that need `chown` on their data dir (MySQL, PostgreSQL ≤ 17) are pointed at a **subdirectory** via `--datadir` / `PGDATA` — the templates already handle this. See the [Compose reference](#compose-reference) for details.
 
+## MCP server
+
+IcontainU ships an embedded [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI client can operate containers, images, machines, volumes, networks, and Compose projects on your behalf - useful for "bring this stack up and verify it's healthy" workflows driven from Claude Code, OpenCode, or any MCP-compatible client.
+
+- **Transport**: MCP over Streamable HTTP at `/mcp` (swift-nio server, default port `3000`).
+- **Auth**: Bearer API key, generated and managed in the in-app **MCP** panel. Constant-time comparison; no key, no access.
+- **Bind**: `127.0.0.1` (localhost only) by default; switch to `0.0.0.0` in the panel to reach it from the LAN.
+
+**25 tools** across 6 resource groups:
+
+| Resource | Tools |
+| --- | --- |
+| Container | `list`, `create`, `start`, `stop`, `delete`, `exec`, `logs`, `inspect` |
+| Image | `list`, `pull`, `delete` |
+| Machine | `list`, `boot`, `stop`, `delete` |
+| Volume | `list`, `create`, `delete` |
+| Network | `list`, `create`, `delete` |
+| Compose | `list`, `up`, `down`, `status` |
+
+Full tool schemas, parameters, and examples: [docs/mcp_server.md](docs/mcp_server.md).
+
+Quick start from a client config (`.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "containers": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": { "Authorization": "Bearer <your-api-key>" }
+    }
+  }
+}
+```
 ## License & acknowledgements
 
 Licensed under the Apache License 2.0 — see [LICENSE](LICENSE). Built on Apple's `container` and `containerization`; see [NOTICE](NOTICE) for attribution.
