@@ -14,3 +14,7 @@ DerivedData/
 .mcp.json
 # Local compose bind-mount test data
 /mysql-data/
+技术方案说明书.docx
+监所心理评估大模型及系统_报价书.xlsx
+gen_doc.py
+gen_quote.py

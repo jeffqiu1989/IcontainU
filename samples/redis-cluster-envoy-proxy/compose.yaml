@@ -1,0 +1,140 @@
+# Redis Cluster (3 master + 3 replica) behind Envoy redis_proxy.
+#
+# Architecture:
+#   external client ──→ host:6379 ──→ envoy ──→ {m-0,m-1,m-2,r-0,r-1,r-2}
+#   (plain Redis, no -c)              (slot-aware proxy, handles MOVED internally)
+#
+# The 6 redis:7 nodes form a 3-master / 3-replica cluster:
+#   m-0/m-1/m-2  → each owns ~1/3 of the slots
+#   r-0/r-1/r-2  → each is replica of one master
+#
+# With replicas, a single master failure triggers automatic failover:
+# the replica promotes to master and takes over the slots.
+# The cluster stays operational (no CLUSTERDOWN).
+#
+# cluster-announce-hostname + IcontainU's /etc/hosts injection routes
+# node-to-node gossip over real eth0 IPs (sidestepping DNS 28.x bug).
+#
+# Envoy uses envoy.clusters.redis cluster type: queries CLUSTER SLOTS
+# from seed nodes, routes each command to the owning shard, follows MOVED/ASK.
+
+services:
+  # ── Master nodes ──
+  redis-m-0:
+    image: redis:7
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --cluster-announce-hostname redis-m-0
+    volumes:
+      - redis-m-0:/data
+
+  redis-m-1:
+    image: redis:7
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --cluster-announce-hostname redis-m-1
+    volumes:
+      - redis-m-1:/data
+
+  redis-m-2:
+    image: redis:7
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --cluster-announce-hostname redis-m-2
+    volumes:
+      - redis-m-2:/data
+
+  # ── Replica nodes ──
+  redis-r-0:
+    image: redis:7
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --cluster-announce-hostname redis-r-0
+    volumes:
+      - redis-r-0:/data
+
+  redis-r-1:
+    image: redis:7
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --cluster-announce-hostname redis-r-1
+    volumes:
+      - redis-r-1:/data
+
+  redis-r-2:
+    image: redis:7
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --cluster-announce-hostname redis-r-2
+    volumes:
+      - redis-r-2:/data
+
+  # ── Cluster initialization ──
+  redis-cluster-init:
+    image: redis:7
+    depends_on:
+      - redis-m-0
+      - redis-m-1
+      - redis-m-2
+      - redis-r-0
+      - redis-r-1
+      - redis-r-2
+    command:
+      - sh
+      - -c
+      - |
+        for i in $(seq 1 60); do
+          redis-cli -h redis-m-0 ping && redis-cli -h redis-m-1 ping && redis-cli -h redis-m-2 ping && \
+          redis-cli -h redis-r-0 ping && redis-cli -h redis-r-1 ping && redis-cli -h redis-r-2 ping && \
+          break
+          sleep 1
+        done
+        redis-cli --cluster create \
+          redis-m-0:6379 redis-m-1:6379 redis-m-2:6379 \
+          redis-r-0:6379 redis-r-1:6379 redis-r-2:6379 \
+          --cluster-replicas 1 --cluster-yes
+
+  # ── Envoy proxy ──
+  envoy:
+    image: envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - redis-m-0
+      - redis-m-1
+      - redis-m-2
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+
+volumes:
+  redis-m-0:
+  redis-m-1:
+  redis-m-2:
+  redis-r-0:
+  redis-r-1:
+  redis-r-2:

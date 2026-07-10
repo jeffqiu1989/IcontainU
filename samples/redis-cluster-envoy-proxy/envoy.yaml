@@ -1,10 +1,10 @@
-# Envoy redis_proxy filter in front of a 3-node Redis Cluster.
+# Envoy redis_proxy filter in front of a 3-master / 3-replica Redis Cluster.
 #
-# envoy.clusters.redis discovers the cluster topology (CLUSTER SLOTS) from the
-# seed endpoints and routes each command to the owning shard. enable_redirection
-# makes Envoy follow MOVED/ASK on topology changes rather than surfacing them to
-# the client — so a downstream client treats Envoy as a single (non-cluster)
-# Redis endpoint and never needs -c or cluster awareness.
+# Same config as redis-cluster-proxy/envoy.yaml; the only difference is the
+# set of seed endpoints (6 nodes instead of 3).
+#
+# enable_redirection makes Envoy follow MOVED/ASK internally so the downstream
+# client treats Envoy as a single non-cluster Redis endpoint.
 
 static_resources:
   listeners:
@@ -38,18 +38,36 @@ static_resources:
         cluster_name: redis_cluster
         endpoints:
           - lb_endpoints:
+              # Master seed nodes
               - endpoint:
                   address:
                     socket_address:
-                      address: redis-node-0
+                      address: redis-m-0
                       port_value: 6379
               - endpoint:
                   address:
                     socket_address:
-                      address: redis-node-1
+                      address: redis-m-1
                       port_value: 6379
               - endpoint:
                   address:
                     socket_address:
-                      address: redis-node-2
+                      address: redis-m-2
+                      port_value: 6379
+              # Replica seed nodes (Envoy discovers they are replicas and
+              # routes read-only commands there; writes still go to masters)
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis-r-0
+                      port_value: 6379
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis-r-1
+                      port_value: 6379
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis-r-2
                       port_value: 6379
