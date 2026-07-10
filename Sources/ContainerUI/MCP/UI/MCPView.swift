@@ -155,7 +155,7 @@ struct MCPView: View {
                     } label: {
                         Label("Generate Key", systemImage: "plus")
                     }
-                    .controlSize(.small)
+                    .buttonStyle(.blueOutline)
                 }
 
                 if server.settings.apiKeys.isEmpty {
@@ -218,7 +218,7 @@ struct MCPView: View {
     private var logCard: some View {
         card {
             VStack(alignment: .leading, spacing: 12) {
-                Label("Request Log", systemImage: "list.bullet.rectangle")
+                Label("Requests", systemImage: "list.bullet.rectangle")
                     .font(.callout.weight(.semibold))
 
                 if server.requestLog.entries.isEmpty {
@@ -275,7 +275,7 @@ struct MCPView: View {
                                             .lineLimit(1)
                                             .truncationMode(.tail)
                                     }
-                                    Text("Details")
+                                    Text("DETAILS")
                                         .font(.caption)
                                         .foregroundColor(.accentColor)
                                         .underline()

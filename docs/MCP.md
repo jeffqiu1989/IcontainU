@@ -317,4 +317,4 @@ MCP Server 嵌入主 App，在 **MCPView** 界面手动开关和配置。
 ### 后续可扩展
 
 - 按 Key 调用统计、rate limiting、只读模式
-- `container_logs`、`inspect_image`（plan 中列出但未实现）
+- `image_inspect`（plan 中列出但未实现）
