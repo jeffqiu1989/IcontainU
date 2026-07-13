@@ -12,9 +12,8 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     case images
     case volumes
     case networks
-    // REGISTRY
+    // SETTINGS
     case registries
-    // bottom
     case mcp
     case system
 
@@ -86,10 +85,8 @@ struct Sidebar: View {
                 row(.volumes)
                 row(.networks)
             }
-            Section("Registry") {
+            Section("Settings") {
                 row(.registries)
-            }
-            Section("System") {
                 row(.mcp)
                 row(.system)
             }
