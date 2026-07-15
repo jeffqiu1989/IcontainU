@@ -88,7 +88,9 @@ final class SystemModel {
 
     /// Start the system. If no kernel is installed, brings up the apiserver first
     /// (without a kernel), then downloads the kernel via XPC with real progress.
-    /// GitHub connectivity determines the download URL (original vs mirror).
+    /// A configured proxy (http_proxy/https_proxy env on the apiserver, set
+    /// by TerminalLauncher.startSystem) handles restricted networks; otherwise
+    /// it downloads directly from GitHub. No mirror fallback.
     ///
     /// A cancelled or failed kernel install aborts the whole flow — the system
     /// is never started without a kernel (state stays `.readyButNoKernel`).
@@ -114,32 +116,28 @@ final class SystemModel {
 
         // Bring up apiserver without a kernel (--disable-kernel-install).
         // The apiserver starts in seconds; kernel download happens separately.
-        statusHint = "Starting service…"
+        statusHint = String(localized: "Starting service…")
         await runStart(.skip)
         guard isApiserverUp else {
             actionError = OperationError(
-                title: "Failed to start the system",
+                title: String(localized: "Failed to start the system"),
                 detail: "The container service did not start. Please try again.")
             return
         }
 
-        // Now download the kernel via XPC (with real progress).
-        // Probe GitHub connectivity to decide the URL.
-        statusHint = "Checking network…"
+        // Download the kernel via XPC (with real progress). The apiserver honors
+        // http_proxy/https_proxy env (injected by TerminalLauncher.startSystem
+        // when a proxy is configured), so a proxy handles restricted networks;
+        // otherwise it downloads directly from GitHub. No probe or mirror fallback.
+        statusHint = String(localized: "Downloading kernel…")
         let kernelURL: URL
         do {
             kernelURL = try await SystemConfig.load().kernel.url
         } catch {
-            kernelError = (title: "Kernel download failed", message: error.localizedDescription)
+            kernelError = (title: String(localized: "Kernel download failed"), message: error.localizedDescription)
             return
         }
-        if await canReachGitHub() {
-            statusHint = nil
-            await installKernel(url: kernelURL)
-        } else {
-            statusHint = nil
-            await installKernelViaMirror()
-        }
+        await installKernel(url: kernelURL)
     }
 
     /// Run `container system start` with the given kernel-install mode, then ping.
@@ -148,7 +146,7 @@ final class SystemModel {
             try await Task.detached { try TerminalLauncher.startSystem(kernelInstall: mode) }.value
         } catch {
             actionError = OperationError(
-                title: "Failed to start the system", detail: error.localizedDescription)
+                title: String(localized: "Failed to start the system"), detail: error.localizedDescription)
         }
         await refreshState()
     }
@@ -166,7 +164,7 @@ final class SystemModel {
             try await Task.detached { try TerminalLauncher.stopSystem() }.value
         } catch {
             actionError = OperationError(
-                title: "Failed to stop the system", detail: error.localizedDescription)
+                title: String(localized: "Failed to stop the system"), detail: error.localizedDescription)
         }
         await refreshState()
     }
@@ -180,34 +178,13 @@ final class SystemModel {
 
     func clearActionError() { actionError = nil }
 
-    // MARK: - Kernel mirror download
-
-    /// GitHub proxy domains tried in order when downloading via a mirror.
-    private static let githubProxyDomains = ["gh-proxy.com", "ghfast.top", "gh-ddlc.top"]
-
-    /// Lightweight reachability probe: a HEAD request to GitHub with a short
-    /// timeout, so mainland-China users don't wait for the CLI to time out.
-    private func canReachGitHub() async -> Bool {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 5
-        var request = URLRequest(url: URL(string: "https://github.com")!)
-        request.httpMethod = "HEAD"
-        let session = URLSession(configuration: config)
-        do {
-            let (_, response) = try await session.data(for: request)
-            return (response as? HTTPURLResponse) != nil
-        } catch {
-            return false
-        }
-    }
-
     /// Install the kernel from a given URL via XPC, reporting real progress.
     private func installKernel(url: URL) async {
         let config: ContainerSystemConfig
         do { config = try await SystemConfig.load() }
-        catch { kernelError = (title: "Kernel download failed", message: error.localizedDescription); return }
+        catch { kernelError = (title: String(localized: "Kernel download failed"), message: error.localizedDescription); return }
 
-        let progress = OperationProgress(phaseLabel: "Downloading kernel…", tracksUnpackPhase: true)
+        let progress = OperationProgress(phaseLabel: String(localized: "Downloading kernel…"), tracksUnpackPhase: true)
         kernelProgress = progress
         defer { kernelProgress = nil }
 
@@ -223,61 +200,11 @@ final class SystemModel {
             await refreshState()
         } catch is CancellationError {
             kernelError = (
-                title: "Kernel required",
+                title: String(localized: "Kernel required"),
                 message: "The kernel download was cancelled. The kernel is required to run containers and machines.")
         } catch {
-            // Fallback: try mirrors automatically
-            await installKernelViaMirror(config: config)
+            kernelError = (title: String(localized: "Kernel download failed"), message: error.localizedDescription)
         }
-    }
-
-    /// Install the kernel via GitHub mirrors, reporting real progress. Tries each
-    /// proxy domain in turn. The apiserver must already be running (XPC call).
-    private func installKernelViaMirror() async {
-        let config: ContainerSystemConfig
-        do { config = try await SystemConfig.load() }
-        catch { kernelError = (title: "Kernel download failed", message: error.localizedDescription); return }
-        await installKernelViaMirror(config: config)
-    }
-
-    private func installKernelViaMirror(config: ContainerSystemConfig) async {
-        let originalURL = config.kernel.url.absoluteString
-        let binaryPath = config.kernel.binaryPath
-        let platform = SystemPlatform.current
-
-        if kernelProgress == nil {
-            kernelProgress = OperationProgress(phaseLabel: "Downloading kernel via mirror…", tracksUnpackPhase: true)
-        }
-        defer { kernelProgress = nil }
-
-        var lastError: Error?
-        for domain in Self.githubProxyDomains {
-            if Task.isCancelled { return }
-            let mirrorURL = "https://\(domain)/\(originalURL)"
-            do {
-                try await ClientKernel.installKernelFromTar(
-                    tarFile: mirrorURL,
-                    kernelFilePath: binaryPath,
-                    platform: platform,
-                    progressUpdate: { [weak self] events in
-                        await self?.applyKernelProgress(events)
-                    },
-                    force: true)
-                await refreshState()  // kernel installed → refresh state
-                return
-            } catch is CancellationError {
-                kernelError = (
-                    title: "Kernel required",
-                    message: "The kernel download was cancelled. The kernel is required to run containers and machines.")
-                return
-            } catch {
-                lastError = error  // try the next mirror
-            }
-        }
-
-        kernelError = (
-            title: "Kernel download failed",
-            message: "Could not download the kernel from any mirror. Check your network.\n\n\(lastError?.localizedDescription ?? "unknown error")")
     }
 
     private func applyKernelProgress(_ events: [ProgressUpdateEvent]) {
@@ -295,7 +222,7 @@ final class SystemModel {
         isBusy = false
         statusHint = nil
         kernelError = (
-            title: "Kernel required",
+            title: String(localized: "Kernel required"),
             message: "The kernel is required to run containers and machines. The download was cancelled.")
 
         // The XPC download runs inside the apiserver daemon — cancelling the

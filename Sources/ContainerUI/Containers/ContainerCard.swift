@@ -233,7 +233,7 @@ struct ContainerCard: View {
     /// semantic color, then the chip content stretched to full width so the
     /// single-line layout knows its budget.
     private func rowContainer<C: View>(
-        icon: String, accent: Color, isEmpty: Bool, emptyText: String, @ViewBuilder content: () -> C
+        icon: String, accent: Color, isEmpty: Bool, emptyText: LocalizedStringKey, @ViewBuilder content: () -> C
     ) -> some View {
         HStack(alignment: .top, spacing: 8) {
             rowIcon(icon, accent: accent)
@@ -313,7 +313,7 @@ struct ContainerCard: View {
     }
 
     private func actionButton(
-        icon: String, tint: Color, help: String, disabled: Bool, action: @escaping () -> Void
+        icon: String, tint: Color, help: LocalizedStringKey, disabled: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)

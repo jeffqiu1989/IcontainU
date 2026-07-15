@@ -263,8 +263,13 @@ final class ContainersModel {
 
         let platform = try? Platform(from: "linux/\(Arch.hostArchitecture().rawValue)")
         let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
+        let viaProxy = !ProxyConfig.appliedURLString.isEmpty
         let progress = OperationProgress()
-        progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
+        progress.beginPhase(
+            viaMirror
+                ? String(localized: "Pulling \(trimmed) via mirror…")
+                : viaProxy ? String(localized: "Pulling \(trimmed) via proxy…")
+                : String(localized: "Pulling \(trimmed)…"))
         guard pullGeneration == generation else { return false }
         pulling = progress
         defer { if pullGeneration == generation { pulling = nil } }
@@ -408,8 +413,7 @@ final class ContainersModel {
         if container.status == .stopped {
             lastError = OperationError(
                 title: "Container already stopped",
-                detail: "Container \"\(id)\" has already stopped. "
-                    + "If that wasn't expected, open it and check the Logs tab.")
+                detail: String(localized: "Container \"\(id)\" has already stopped. If that wasn't expected, open it and check the Logs tab."))
         }
     }
 

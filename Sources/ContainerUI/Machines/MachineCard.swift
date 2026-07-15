@@ -23,7 +23,7 @@ struct MachineCard: View {
         CardPalette(color: Palette.machines)
     }
 
-    private var ipText: String { machine.ipAddress ?? "No address" }
+    private var ipText: String { machine.ipAddress ?? String(localized: "No address") }
 
     private var distro: LinuxDistro {
         LinuxDistro(imageReference: machine.configuration.image.reference)
@@ -41,7 +41,7 @@ struct MachineCard: View {
                 Spacer(minLength: 0)
             }
             infoRow(icon: "network", text: ipText, secondary: machine.ipAddress == nil)
-            infoRow(icon: "internaldrive", text: diskText ?? "Unknown size", secondary: diskText == nil)
+            infoRow(icon: "internaldrive", text: diskText ?? String(localized: "Unknown size"), secondary: diskText == nil)
             actions
         }
         .padding(14)
@@ -104,7 +104,7 @@ struct MachineCard: View {
     }
 
     private func actionButton(
-        icon: String, tint: Color, help: String, disabled: Bool, action: @escaping () -> Void
+        icon: String, tint: Color, help: LocalizedStringKey, disabled: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)

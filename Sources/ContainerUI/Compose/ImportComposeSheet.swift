@@ -153,7 +153,7 @@ struct ImportComposeSheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                    Text("\(formState.warnings.count) warning\(formState.warnings.count == 1 ? "" : "s")")
+                    Text("\(formState.warnings.count) warnings")
                         .font(.callout.weight(.semibold))
                 }
                 ForEach(formState.warnings, id: \.self) { warning in
@@ -199,7 +199,7 @@ struct ImportComposeSheet: View {
     }
 
     @ViewBuilder
-    private func resourceLine(_ label: String, _ values: [String]) -> some View {
+    private func resourceLine(_ label: LocalizedStringKey, _ values: [String]) -> some View {
         if !values.isEmpty {
             HStack(alignment: .top, spacing: 6) {
                 Text(label)
@@ -234,7 +234,7 @@ struct ImportComposeSheet: View {
         panel.allowedContentTypes = [UTType.yaml, UTType.plainText].compactMap { $0 }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            analyzeError = "Couldn't read \(url.lastPathComponent)."
+            analyzeError = String(localized: "Couldn't read \(url.lastPathComponent).")
             return
         }
         yamlText = text
@@ -286,7 +286,7 @@ struct ImportComposeSheet: View {
                     do {
                         try fm.createDirectory(atPath: source, withIntermediateDirectories: true)
                     } catch {
-                        bindPathError = "Cannot create bind-mount directory \"\(source)\": \(error.localizedDescription)"
+                        bindPathError = String(localized: "Cannot create bind-mount directory \"\(source)\": \(error.localizedDescription)")
                         return
                     }
                 }
@@ -418,7 +418,7 @@ private struct ServiceEditorCard: View {
             }
 
             cardRow("Command") {
-                TextField("command", text: $config.command)
+                TextField("commands", text: $config.command)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
             }
@@ -476,11 +476,11 @@ private struct ServiceEditorCard: View {
                     .init("udp", text: "UDP"),
                 ])
                 .frame(width: 76)
-                TextField("host", text: $config.ports[index].hostPort)
+                TextField("host port", text: $config.ports[index].hostPort)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 70)
                 Text(":").foregroundStyle(.secondary)
-                TextField("container", text: $config.ports[index].containerPort)
+                TextField("port", text: $config.ports[index].containerPort)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 70)
                 Spacer(minLength: 0)
@@ -573,7 +573,7 @@ private struct ServiceEditorCard: View {
     /// One labeled row: a fixed leading label column, content trailing. Used for
     /// every field so the card aligns on a single label edge.
     private func cardRow<Content: View>(
-        _ label: String, @ViewBuilder content: () -> Content
+        _ label: LocalizedStringKey, @ViewBuilder content: () -> Content
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)

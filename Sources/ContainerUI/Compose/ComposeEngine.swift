@@ -74,7 +74,7 @@ enum ComposeEngine {
                 }
                 if existing.status != .running {
                     log.info("starting existing compose container", metadata: ["id": "\(id)"])
-                    _ = await beginPhase("\(service): starting…")
+                    _ = await beginPhase(String(localized: "\(service): starting…"))
                     let process = try await client.bootstrap(id: id, stdio: [nil, nil, nil])
                     try await process.start()
                     let s = StartedService(service: service, id: id, process: process)
@@ -110,7 +110,7 @@ enum ComposeEngine {
             try Task.checkCancellation()
             log.info("creating compose service", metadata: ["project": "\(project)", "service": "\(service)"])
             let (createdID, process) = try await ContainerCreateEngine.createRetainingProcess(spec: spec) { label in
-                await beginPhase("\(service): \(label)")
+                await beginPhase(String(localized: "\(service): \(label)"))
             }
             let s = StartedService(service: service, id: createdID, process: process)
             onStarted?(s)

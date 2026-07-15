@@ -308,12 +308,12 @@ private struct CreateMachineSheet: View {
     private var resourcesSection: some View {
         section(title: "Resources", subtitle: "Optional — blank uses system defaults") {
             labeledField("CPUs") {
-                TextField("e.g. 4", text: $cpus)
+                TextField("4 cores", text: $cpus)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
             }
             labeledField("Memory") {
-                TextField("e.g. 4G", text: $memory)
+                TextField("4G", text: $memory)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
             }
@@ -350,7 +350,7 @@ private struct CreateMachineSheet: View {
     // MARK: Building blocks
 
     @ViewBuilder
-    private func section(title: String, subtitle: String?, @ViewBuilder content: () -> some View)
+    private func section(title: LocalizedStringKey, subtitle: LocalizedStringKey?, @ViewBuilder content: () -> some View)
         -> some View
     {
         VStack(alignment: .leading, spacing: 10) {
@@ -367,7 +367,7 @@ private struct CreateMachineSheet: View {
         }
     }
 
-    private func labeledField(_ label: String, @ViewBuilder field: () -> some View) -> some View {
+    private func labeledField(_ label: LocalizedStringKey, @ViewBuilder field: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
                 .font(.callout)

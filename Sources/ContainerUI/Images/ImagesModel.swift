@@ -122,9 +122,14 @@ final class ImagesModel {
         lastError = nil
         let platform = currentLinuxPlatform
         let viaMirror = RegistryMirrorStore.shared.rewrite(trimmed) != trimmed
+        let viaProxy = !ProxyConfig.appliedURLString.isEmpty
 
         let progress = OperationProgress()
-        progress.beginPhase(viaMirror ? "Pulling \(trimmed) via mirror…" : "Pulling \(trimmed)…")
+        progress.beginPhase(
+            viaMirror
+                ? String(localized: "Pulling \(trimmed) via mirror…")
+                : viaProxy ? String(localized: "Pulling \(trimmed) via proxy…")
+                : String(localized: "Pulling \(trimmed)…"))
         // Only the current generation owns `pull`: a superseded task (cancelled but
         // still running its server-side pull) must not set or clear it. Mirrors the
         // `creating`/`pulling` guards in the machine/container models.
@@ -204,7 +209,7 @@ final class ImagesModel {
         let platform = currentLinuxPlatform
 
         let progress = OperationProgress()
-        progress.beginPhase("Saving \(reference)…")
+        progress.beginPhase(String(localized: "Saving \(reference)…"))
         guard exportGeneration == generation else { return }
         export = progress
         defer { if exportGeneration == generation { export = nil } }
@@ -389,7 +394,12 @@ struct ImageRepoGroup: Identifiable {
     }
 
     private static func makeRow(_ image: ContainerImage, tag: String?) -> ImageTagRow {
-        let entries = image.variants.map(ImageArchEntry.init(variant:))
+        // Drop attestation/referrer entries: OCI 1.1 indexes include manifest
+        // descriptors with platform {architecture:"unknown", os:"unknown"} for
+        // signatures/attestations - not runnable architectures.
+        let entries = image.variants
+            .map(ImageArchEntry.init(variant:))
+            .filter { !$0.arch.isEmpty && $0.arch.lowercased() != "unknown" }
         let host = Platform.current
         // Prefer the exact host platform, then arm64, then amd64, then whatever
         // is first — so the default row is always runnable when possible.
@@ -411,7 +421,7 @@ struct ImageRepoGroup: Identifiable {
             tag: tag ?? "<none>",
             current: current,
             others: others,
-            totalSize: image.totalSize)
+            totalSize: entries.reduce(0) { $0 + $1.size })
     }
 
     /// `latest` sorts first; everything else is ordered descending so newer-looking

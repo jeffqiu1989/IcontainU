@@ -314,7 +314,7 @@ struct ComposeProjectCard: View {
     /// height frame didn't hold a uniform height across the two variants).
     @ViewBuilder
     private func actionButton(
-        _ title: String, icon: String, tint: Color, help: String,
+        _ title: LocalizedStringKey, icon: String, tint: Color, help: LocalizedStringKey,
         showTitle: Bool, disabled: Bool, labelSpacing: CGFloat = 0,
         action: @escaping () -> Void
     ) -> some View {
@@ -328,7 +328,7 @@ struct ComposeProjectCard: View {
 
     @ViewBuilder
     private func actionLabel(
-        _ title: String, icon: String, tint: Color, showTitle: Bool, disabled: Bool,
+        _ title: LocalizedStringKey, icon: String, tint: Color, showTitle: Bool, disabled: Bool,
         labelSpacing: CGFloat = 0
     ) -> some View {
         let chrome = RoundedRectangle(cornerRadius: 6)

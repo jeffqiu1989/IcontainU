@@ -8,6 +8,30 @@ struct RegistryMirror: Codable, Identifiable, Equatable {
     var source: String
     var mirror: String
     var enabled: Bool = true
+
+    private enum CodingKeys: String, CodingKey {
+        case id, source, mirror, enabled
+    }
+
+    init(id: UUID = UUID(), source: String, mirror: String, enabled: Bool = true) {
+        self.id = id
+        self.source = source
+        self.mirror = mirror
+        self.enabled = enabled
+    }
+
+    /// Tolerates import files that omit `id` (a fresh UUID is generated) and
+    /// `enabled` (defaults to true), so hand-written / sample JSON like
+    /// `{"source":"docker.io","mirror":"docker.m.daocloud.io"}` decodes cleanly
+    /// instead of throwing keyNotFound ("data missing"). `id` is still written on
+    /// encode, so the persisted UserDefaults format is unchanged.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        self.source = try c.decode(String.self, forKey: .source)
+        self.mirror = try c.decode(String.self, forKey: .mirror)
+        self.enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
 }
 
 /// Stores user-defined registry mirror mappings and rewrites image references to
@@ -27,19 +51,6 @@ final class RegistryMirrorStore {
 
     /// Docker Hub's canonical domain, assumed for references without a domain.
     static let dockerHub = "docker.io"
-
-    /// Built-in preset: DaoCloud (m.daocloud.io) prefix-style mirrors.
-    static let daocloudPreset: [RegistryMirror] = [
-        .init(source: "docker.io", mirror: "docker.m.daocloud.io"),
-        .init(source: "gcr.io", mirror: "gcr.m.daocloud.io"),
-        .init(source: "ghcr.io", mirror: "ghcr.m.daocloud.io"),
-        .init(source: "k8s.gcr.io", mirror: "k8s-gcr.m.daocloud.io"),
-        .init(source: "registry.k8s.io", mirror: "k8s.m.daocloud.io"),
-        .init(source: "mcr.microsoft.com", mirror: "mcr.m.daocloud.io"),
-        .init(source: "nvcr.io", mirror: "nvcr.m.daocloud.io"),
-        .init(source: "quay.io", mirror: "quay.m.daocloud.io"),
-        .init(source: "docker.elastic.co", mirror: "elastic.m.daocloud.io"),
-    ]
 
     init() {
         load()
@@ -81,10 +92,15 @@ final class RegistryMirrorStore {
         save()
     }
 
-    /// Import the DaoCloud preset, skipping sources that already have a mapping.
-    func importDaoCloudPreset() {
+    /// Import mirror mappings from a JSON file (an array of `{source, mirror, enabled}`),
+    /// skipping sources that already have a mapping so importing is non-destructive.
+    /// Sample presets live under `samples/registry-mirrors-*.json` (DaoCloud, 1ms.run).
+    /// Throws on read or decode failure; the caller surfaces the error in an alert.
+    func importMirrors(from url: URL) throws {
+        let data = try Data(contentsOf: url)
+        let entries = try JSONDecoder().decode([RegistryMirror].self, from: data)
         let existing = Set(mirrors.map(\.source))
-        for entry in Self.daocloudPreset where !existing.contains(entry.source) {
+        for entry in entries where !existing.contains(entry.source) {
             mirrors.append(entry)
         }
         save()

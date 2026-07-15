@@ -196,7 +196,7 @@ struct CreateContainerSheet: View {
     private var nameSection: some View {
         LabeledSection(label: "Name") {
             HStack(spacing: 8) {
-                TextField("Optional — auto-generated if blank", text: $form.name)
+                TextField("container name", text: $form.name)
                     .textFieldStyle(.roundedBorder)
                 // Invisible placeholder matching loadButton's width so the
                 // Name TextField aligns with Image's TextField.
@@ -290,11 +290,11 @@ struct CreateContainerSheet: View {
                         .init("udp", text: "UDP"),
                     ])
                     .frame(width: 76)
-                    TextField("host", text: $row.hostPort)
+                    TextField("host port", text: $row.hostPort)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 62)
                     Text(":").foregroundStyle(.secondary)
-                    TextField("container", text: $row.containerPort)
+                    TextField("port", text: $row.containerPort)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 62)
                     Spacer(minLength: 8)
@@ -442,7 +442,7 @@ struct CreateContainerSheet: View {
 
     private var commandSection: some View {
         LabeledSection(label: "Command") {
-            TextField("Image default — e.g. sleep infinity for shell images", text: $form.command)
+            TextField("commands", text: $form.command)
                 .textFieldStyle(.roundedBorder)
         }
     }

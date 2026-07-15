@@ -29,7 +29,7 @@ struct InlineProgressBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
-                Text(progress.phaseLabel)
+                Text(LocalizedStringKey(progress.phaseLabel))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

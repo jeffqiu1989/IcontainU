@@ -21,8 +21,8 @@ struct FormSheet<Body: View, Footer: View>: View {
 
     let icon: String
     let iconColor: Color
-    let title: String
-    var subtitle: String?
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey?
     var width: Width = .narrow
     var height: CGFloat?
     @ViewBuilder var content: () -> Body
@@ -74,7 +74,7 @@ struct FormSheet<Body: View, Footer: View>: View {
 /// (macOS Settings style); an optional trailing accessory (e.g. an "Add" button)
 /// rides on the same line as the label.
 struct LabeledSection<Content: View, Accessory: View>: View {
-    let label: String
+    let label: LocalizedStringKey
     @ViewBuilder var accessory: () -> Accessory
     @ViewBuilder var content: () -> Content
 
@@ -103,7 +103,7 @@ struct LabeledSection<Content: View, Accessory: View>: View {
 }
 
 extension LabeledSection where Accessory == EmptyView {
-    init(label: String, @ViewBuilder content: @escaping () -> Content) {
+    init(label: LocalizedStringKey, @ViewBuilder content: @escaping () -> Content) {
         self.label = label
         self.accessory = { EmptyView() }
         self.content = content

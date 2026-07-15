@@ -38,6 +38,15 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BIN_PATH" "$MACOS_DIR/$APP_NAME"
 
+echo "==> Copying localized strings"
+# Copy .lproj dirs straight from the source tree (preserving canonical locale
+# casing, e.g. zh-Hans). SPM lowercases them in the module resource bundle, and
+# macOS matches zh-Hans more reliably against the canonical name.
+for lproj in "$REPO_ROOT/Sources/ContainerUI/Resources"/*.lproj; do
+    [[ -d "$lproj" ]] || continue
+    cp -R "$lproj" "$RESOURCES_DIR/"
+done
+
 echo "==> Generating app icon from $(basename "$ICON_SRC")"
 if [[ ! -f "$ICON_SRC" ]]; then
     echo "error: icon source not found at $ICON_SRC" >&2
@@ -74,6 +83,13 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>$ICON_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh-Hans</string>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>$MIN_MACOS</string>
     <key>LSApplicationCategoryType</key>

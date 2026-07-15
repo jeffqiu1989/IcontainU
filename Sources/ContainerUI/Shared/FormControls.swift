@@ -44,7 +44,7 @@ struct StyledPicker<Value: Hashable>: View {
     /// Selectable entries as (value, title) pairs, in display order.
     let options: [(value: Value, title: String)]
     /// Shown when the current selection matches no option (e.g. an empty volume pick).
-    var placeholder: String = "Select…"
+    var placeholder: String = String(localized: "Select…")
     var minWidth: CGFloat?
     var disabled: Bool = false
 

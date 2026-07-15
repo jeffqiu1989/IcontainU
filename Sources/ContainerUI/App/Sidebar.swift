@@ -19,7 +19,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
         case .containers: "Containers"
         case .compose: "Compose"

@@ -44,7 +44,7 @@ struct ComposeProbe {
         dependency: String,
         beginPhase: @escaping @Sendable (String) async -> ProgressUpdateHandler
     ) async throws {
-        _ = await beginPhase("\(service): waiting for \(dependency) to be healthy…")
+        _ = await beginPhase(String(localized: "\(service): waiting for \(dependency) to be healthy…"))
 
         let startedAt = Date()
         var lastProbeAt: Date = .distantPast

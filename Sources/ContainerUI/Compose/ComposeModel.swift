@@ -275,7 +275,7 @@ final class ComposeModel {
             return
         }
 
-        let progress = OperationProgress(phaseLabel: "Starting \(record.name)…")
+        let progress = OperationProgress(phaseLabel: String(localized: "Starting \(record.name)…"))
         guard upGeneration == generation else { return }
         upping = progress
         uppingProject = record.name
@@ -314,18 +314,15 @@ final class ComposeModel {
             if let composeErr = error as? ComposeError,
                case .serviceUnhealthy(let svc, let dep) = composeErr {
                 lastError = OperationError(
-                    title: "Failed to bring up \"\(record.name)\"",
-                    detail: "Service \"\(svc)\" depends on \"\(dep)\", which did not "
-                        + "become healthy within its health-check window. Open \"\(dep)\" "
-                        + "in the Containers tab to view its logs, fix the compose file, "
-                        + "then bring the project up again.")
+                    title: String(localized: "Failed to bring up \"\(record.name)\""),
+                    detail: String(localized: "Service \"\(svc)\" depends on \"\(dep)\", which did not become healthy within its health-check window. Open \"\(dep)\" in the Containers tab to view its logs, fix the compose file, then bring the project up again."))
             } else if let composeErr = error as? ComposeError,
                       case .containerNameConflict = composeErr {
                 lastError = OperationError(
-                    title: "Failed to bring up \"\(record.name)\"",
+                    title: String(localized: "Failed to bring up \"\(record.name)\""),
                     detail: composeErr.localizedDescription)
             } else {
-                lastError = .from("Failed to bring up \"\(record.name)\"", error: error)
+                lastError = .from(String(localized: "Failed to bring up \"\(record.name)\""), error: error)
             }
             await refresh()
         }
@@ -354,7 +351,7 @@ final class ComposeModel {
             try await downThrowing(project: name, removeVolumes: removeVolumes, removeNetworks: removeNetworks)
         } catch {
             guard !error.isCancellation else { return }
-            lastError = .from("Failed to bring down \"\(name)\"", error: error)
+            lastError = .from(String(localized: "Failed to bring down \"\(name)\""), error: error)
         }
     }
 
@@ -487,7 +484,7 @@ final class ComposeModel {
             await refresh()
         } catch {
             guard !error.isCancellation else { return }
-            lastError = .from("Failed to start \"\(name)\"", error: error)
+            lastError = .from(String(localized: "Failed to start \"\(name)\""), error: error)
         }
     }
 
@@ -501,7 +498,7 @@ final class ComposeModel {
             await refresh()
         } catch {
             guard !error.isCancellation else { return }
-            lastError = .from("Failed to stop \"\(name)\"", error: error)
+            lastError = .from(String(localized: "Failed to stop \"\(name)\""), error: error)
         }
     }
 

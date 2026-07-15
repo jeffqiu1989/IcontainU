@@ -84,7 +84,9 @@ enum TerminalLauncher {
     /// Start the container system silently (no Terminal). The kernel install
     /// strategy controls whether the CLI downloads the default kernel itself,
     /// skips it (so the GUI installs via a mirror), or assumes it's present.
-    /// Throws with stderr on failure.
+    /// Throws with stderr on failure. When a proxy is configured
+    /// (`ProxyConfig.isActive`), its env vars are injected so the apiserver
+    /// routes kernel downloads and image pulls through it.
     static func startSystem(kernelInstall: KernelInstallMode = .none) throws {
         let bin = try binaryPath()
         var args = [bin, "system", "start"]
@@ -93,13 +95,39 @@ enum TerminalLauncher {
         case .skip: args.append("--disable-kernel-install")
         case .none: break
         }
-        try runSilently(args)
+        try runSilently(args, environment: proxyEnvironment())
     }
 
     /// Stop the container system silently (no Terminal).
     static func stopSystem() throws {
         let bin = try binaryPath()
         try runSilently([bin, "system", "stop"])
+    }
+
+    /// Build the environment for `container system start`, adding proxy env vars
+    /// when `ProxyConfig.isActive`. The apiserver reads `http_proxy`/`https_proxy`
+    /// via `ProxyUtils.proxyFromEnvironment`; the framework allowlists these keys
+    /// (`PluginLoader.proxyKeys`) so they flow from this process to the apiserver.
+    /// Returns nil (inherit current env) when no proxy is configured.
+    private static func proxyEnvironment() -> [String: String]? {
+        let config = ProxyConfig.current
+        guard let url = config.httpURLString else {
+            // Record "no proxy in effect" so the UI knows the running system has
+            // no proxy and can flag a later enable as needing restart.
+            ProxyConfig.appliedURLString = ""
+            return nil
+        }
+        // Remember what we're starting with, so SystemView can tell whether a
+        // later edit diverges and needs a restart.
+        ProxyConfig.appliedURLString = url
+        var env = ProcessInfo.processInfo.environment
+        env["http_proxy"] = url
+        env["https_proxy"] = url
+        env["HTTP_PROXY"] = url
+        env["HTTPS_PROXY"] = url
+        env["no_proxy"] = "localhost,127.0.0.1"
+        env["NO_PROXY"] = "localhost,127.0.0.1"
+        return env
     }
 
     /// Quote each argument for the shell, join into a command line, then run it in
@@ -139,11 +167,16 @@ enum TerminalLauncher {
     }
 
     /// Run a command directly (no Terminal), waiting for it to finish. Throws with
-    /// captured stderr on a non-zero exit.
-    private static func runSilently(_ arguments: [String]) throws {
+    /// captured stderr on a non-zero exit. If `environment` is supplied it
+    /// replaces the inherited environment (used to inject proxy env vars into
+    /// `container system start`); otherwise the process inherits this app's env.
+    private static func runSilently(_ arguments: [String], environment: [String: String]? = nil) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: arguments[0])
         process.arguments = Array(arguments.dropFirst())
+        if let environment {
+            process.environment = environment
+        }
 
         let errorPipe = Pipe()
         process.standardError = errorPipe

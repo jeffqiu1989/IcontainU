@@ -1,0 +1,11 @@
+[
+  { "source": "docker.io", "mirror": "docker.m.daocloud.io", "enabled": true },
+  { "source": "gcr.io", "mirror": "gcr.m.daocloud.io", "enabled": true },
+  { "source": "ghcr.io", "mirror": "ghcr.m.daocloud.io", "enabled": true },
+  { "source": "k8s.gcr.io", "mirror": "k8s-gcr.m.daocloud.io", "enabled": true },
+  { "source": "registry.k8s.io", "mirror": "k8s.m.daocloud.io", "enabled": true },
+  { "source": "mcr.microsoft.com", "mirror": "mcr.m.daocloud.io", "enabled": true },
+  { "source": "nvcr.io", "mirror": "nvcr.m.daocloud.io", "enabled": true },
+  { "source": "quay.io", "mirror": "quay.m.daocloud.io", "enabled": true },
+  { "source": "docker.elastic.co", "mirror": "elastic.m.daocloud.io", "enabled": true }
+]

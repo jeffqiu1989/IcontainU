@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct ImagesView: View {
     @Environment(ImagesModel.self) private var model
     @State private var pendingDelete: ContainerImage?
-    @State private var showPullSheet = false
+    @State private var showAddSheet = false
     @State private var searchText = ""
 
     /// Repository groups matching the search query (by repo name or any tag).
@@ -46,28 +46,18 @@ struct ImagesView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    showPullSheet = true
+                    showAddSheet = true
                 } label: {
-                    Label("Pull Image", systemImage: "arrow.down.circle")
+                    Label("Add Image", systemImage: "plus")
                 }
-                .disabled(model.pull != nil)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    importImage()
-                } label: {
-                    Label("Import Image", systemImage: "square.and.arrow.down")
-                }
-                .disabled(model.importProgress != nil)
+                .disabled(model.pull != nil || model.importProgress != nil)
             }
         }
         .task {
             await model.startPolling()
         }
-        .sheet(isPresented: $showPullSheet) {
-            PullImageSheet { reference in
-                model.startPullImage(reference: reference)
-            }
+        .sheet(isPresented: $showAddSheet) {
+            AddImageSheet(model: model)
         }
         .confirmationDialog(
             "Delete image?",
@@ -133,7 +123,7 @@ struct ImagesView: View {
     /// Opens a save panel and exports the given image as an OCI tar archive.
     private func exportImage(_ image: ContainerImage) {
         let panel = NSSavePanel()
-        panel.title = "Export Image"
+        panel.title = String(localized: "Export Image")
         panel.nameFieldStringValue = Self.defaultExportFilename(for: image)
         panel.allowedContentTypes = [UTType(filenameExtension: "tar")].compactMap { $0 }
         panel.canCreateDirectories = true
@@ -142,18 +132,6 @@ struct ImagesView: View {
         // not the shortened displayReference — the backend matches the stored
         // canonical reference, same as delete.
         model.startExport(reference: image.name, outputURL: url)
-    }
-
-    /// Opens a file panel and imports images from an OCI tar archive.
-    private func importImage() {
-        let panel = NSOpenPanel()
-        panel.title = "Import Image"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType(filenameExtension: "tar")].compactMap { $0 }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.startImport(inputURL: url)
     }
 
     /// A safe filesystem name for an exported archive, e.g.
@@ -174,37 +152,147 @@ struct ImagesView: View {
     }
 }
 
-/// Modal to enter an image reference to pull.
-private struct PullImageSheet: View {
+/// Unified "add image" sheet: a segmented control picks the source - pull from a
+/// registry (type a reference) or import a local OCI tar (folder picker). Replaces
+/// the old two-button toolbar whose pull/import icons were hard to tell apart.
+private struct AddImageSheet: View {
     @Environment(\.dismiss) private var dismiss
+    let model: ImagesModel
+    @State private var mode: Mode = .pull
     @State private var reference = ""
-    let onPull: (String) -> Void
+    @State private var fileURL: URL?
+
+    enum Mode: CaseIterable, Identifiable {
+        case pull, importFile
+        var id: Self { self }
+        var label: LocalizedStringKey {
+            switch self {
+            case .pull: "Pull from registry"
+            case .importFile: "Import from file"
+            }
+        }
+    }
 
     var body: some View {
         FormSheet(
             icon: "opticaldiscdrive",
             iconColor: Palette.images,
-            title: "Pull Image"
+            title: "Add Image",
+            width: .wide,
+            height: 240
         ) {
-            LabeledSection(label: "Reference") {
-                TextField("e.g. alpine:3.22", text: $reference)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(submit)
+            // Centered segmented control (2 tabs).
+            HStack {
+                Spacer(minLength: 0)
+                Picker("", selection: $mode) {
+                    ForEach(Mode.allCases) { m in Text(m.label).tag(m) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 280)
+                Spacer(minLength: 0)
             }
+
+            // Fixed-height content area so switching tabs doesn't resize the sheet.
+            // Three-column layout, horizontally centered: right-aligned label,
+            // the control (text field / button), then an equal-width trailing
+            // gap. The control column is the same size and position in both tabs.
+            VStack(spacing: 6) {
+                threeColumnRow {
+                    Text(mode == .pull ? "Image" : "File")
+                } control: {
+                    switch mode {
+                    case .pull:
+                        TextField("hello-world:latest", text: $reference)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(submit)
+                    case .importFile:
+                        Button {
+                            chooseFile()
+                        } label: {
+                            Label("Choose File", systemImage: "folder")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.blueOutline)
+                    }
+                }
+
+                // Selected filename feedback under the control column (import only).
+                if mode == .importFile, let fileURL {
+                    threeColumnRow {
+                        EmptyView()
+                    } control: {
+                        Text(fileURL.lastPathComponent)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 70, alignment: .top)
         } footer: {
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button("Pull") { submit() }
+            Button(actionLabel, action: submit)
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(reference.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!canSubmit)
+        }
+    }
+
+    /// Three columns, horizontally centered: a right-aligned label column, the
+    /// control column (the same width/position in both tabs), and an equal-width
+    /// trailing gap so the row is visually centered.
+    @ViewBuilder
+    private func threeColumnRow<L: View, C: View>(
+        @ViewBuilder label: () -> L, @ViewBuilder control: () -> C
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Spacer(minLength: 0)
+            label()
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.primary.opacity(0.85))
+                .frame(width: 60, alignment: .trailing)
+            control()
+                .frame(width: 220)
+            Color.clear.frame(width: 60, height: 0)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var actionLabel: LocalizedStringKey {
+        mode == .pull ? "Pull" : "Import"
+    }
+
+    private var canSubmit: Bool {
+        switch mode {
+        case .pull: !reference.trimmingCharacters(in: .whitespaces).isEmpty
+        case .importFile: fileURL != nil
         }
     }
 
     private func submit() {
-        let value = reference.trimmingCharacters(in: .whitespaces)
-        guard !value.isEmpty else { return }
-        onPull(value)
+        switch mode {
+        case .pull:
+            let ref = reference.trimmingCharacters(in: .whitespaces)
+            guard !ref.isEmpty else { return }
+            model.startPullImage(reference: ref)
+        case .importFile:
+            guard let fileURL else { return }
+            model.startImport(inputURL: fileURL)
+        }
         dismiss()
+    }
+
+    private func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "tar")].compactMap { $0 }
+        if panel.runModal() == .OK { fileURL = panel.url }
     }
 }

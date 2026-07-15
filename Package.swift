@@ -7,6 +7,7 @@ let scVersion = "0.35.0"
 
 let package = Package(
     name: "IcontainU",
+    defaultLocalization: "en",
     platforms: [.macOS("26")],
     products: [
         .executable(name: "IcontainU", targets: ["ContainerUI"])
@@ -45,7 +46,16 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
             ],
-            path: "Sources/ContainerUI"
+            path: "Sources/ContainerUI",
+            resources: [
+                // Localized strings as plain .strings inside per-locale .lproj dirs.
+                // SPM preserves the .lproj structure in the resource bundle; the
+                // packaging script copies these dirs into the .app's Contents/Resources/
+                // so Bundle.main finds them. (swift build does not compile .xcstrings,
+                // so we ship .strings directly - also simpler for non-Xcode contributors.)
+                .process("Resources/en.lproj"),
+                .process("Resources/zh-Hans.lproj"),
+            ]
         ),
         .testTarget(
             name: "ContainerUITests",

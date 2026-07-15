@@ -150,13 +150,13 @@ struct ContainerStatsTab: View {
         }
     }
 
-    private func sectionTitle(_ title: String) -> some View {
+    private func sectionTitle(_ title: LocalizedStringKey) -> some View {
         Text(title)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
     }
 
-    private func metricRow(_ label: String, _ value: String) -> some View {
+    private func metricRow(_ label: LocalizedStringKey, _ value: String) -> some View {
         HStack {
             Text(label)
                 .font(.callout)

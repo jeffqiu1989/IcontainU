@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Manages registry mirror mappings used to accelerate image pulls. Mappings are
 /// GUI-only: they rewrite references before pull, affecting only pulls issued
@@ -6,6 +7,7 @@ import SwiftUI
 struct RegistriesView: View {
     @State private var store = RegistryMirrorStore.shared
     @State private var showAddSheet = false
+    @State private var importError: String?
 
     var body: some View {
         ScrollView {
@@ -36,6 +38,13 @@ struct RegistriesView: View {
                 store.add(source: source, mirror: mirror)
             }
         }
+        .alert("Import Failed", isPresented: Binding(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importError ?? "")
+        }
     }
 
     private var header: some View {
@@ -52,12 +61,29 @@ struct RegistriesView: View {
                     Label("Add Mirror", systemImage: "plus")
                 }
                 Button {
-                    store.importDaoCloudPreset()
+                    importFromFile()
                 } label: {
-                    Label("Import DaoCloud Preset", systemImage: "square.and.arrow.down")
+                    Label("Import Mirrors", systemImage: "square.and.arrow.down")
                 }
             }
             .padding(.top, 2)
+        }
+    }
+
+    /// Open a JSON file of mirror mappings and merge it into the store. Sample
+    /// presets live under `samples/registry-mirrors-*.json` (DaoCloud, 1ms.run).
+    /// Errors (unreadable file, bad JSON) surface in an alert.
+    private func importFromFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try store.importMirrors(from: url)
+        } catch {
+            importError = error.localizedDescription
         }
     }
 }
@@ -127,7 +153,7 @@ private struct AddMirrorSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
             LabeledSection(label: "Mirror") {
-                TextField("e.g. docker.m.daocloud.io", text: $mirror)
+                TextField("docker.m.daocloud.io", text: $mirror)
                     .textFieldStyle(.roundedBorder)
             }
         } footer: {

@@ -76,9 +76,7 @@ struct ComposeView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { project in
-            Text(
-                "Stop and delete all containers in \"\(project.name)\". "
-                    + "Volumes hold your data — keep them unless you want a clean slate.")
+            Text("Stop and delete all containers in \"\(project.name)\". Volumes hold your data — keep them unless you want a clean slate.")
         }
         .confirmationDialog(
             "Remove project?",
@@ -93,9 +91,7 @@ struct ComposeView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { project in
-            Text(
-                "\"\(project.name)\" and all its containers, networks and volumes will be "
-                    + "permanently removed, along with the saved compose file.")
+            Text("\"\(project.name)\" and all its containers, networks and volumes will be permanently removed, along with the saved compose file.")
         }
     }
 

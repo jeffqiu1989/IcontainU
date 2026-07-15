@@ -18,11 +18,11 @@ struct SystemStatusBar: View {
 
     private var label: String {
         switch system.state {
-        case .running: return "System running"
-        case .readyButNoKernel: return "Kernel not installed"
-        case .unavailable: return "System not running"
-        case .notInstalled: return "Not installed"
-        case .unknown: return "Checking…"
+        case .running: return String(localized: "System running")
+        case .readyButNoKernel: return String(localized: "Kernel not installed")
+        case .unavailable: return String(localized: "System not running")
+        case .notInstalled: return String(localized: "Not installed")
+        case .unknown: return String(localized: "Checking…")
         }
     }
 
@@ -78,7 +78,7 @@ struct SystemStatusBar: View {
         }
     }
 
-    private func button(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
+    private func button(_ icon: String, help: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
         }
@@ -91,6 +91,7 @@ struct SystemStatusBar: View {
 /// installed), with the matching call to action.
 struct SystemUnavailableOverlay: View {
     @Environment(SystemModel.self) private var system
+    @State private var proxy = ProxyConfig.current
 
     var body: some View {
         VStack(spacing: 12) {
@@ -129,6 +130,13 @@ struct SystemUnavailableOverlay: View {
                         Text("Start System")
                     }
                     .controlSize(.large)
+
+                    // Optional proxy for restricted networks. Shown on the start
+                    // screen so it's configurable before the kernel download that
+                    // needs it. Takes effect on Start (TerminalLauncher injects env).
+                    ProxyConfigSection(config: $proxy, centered: true)
+                        .padding(.top, 8)
+                        .frame(maxWidth: 360)
                 }
             }
         }
@@ -144,7 +152,7 @@ struct SystemUnavailableOverlay: View {
             Button("Cancel", role: .cancel) { system.clearKernelError() }
             Button("Retry") { system.retryKernelDownload() }
         } message: { error in
-            Text(error.message)
+            Text(LocalizedStringKey(error.message))
         }
         .alert(
             system.actionError?.title ?? "",
@@ -159,7 +167,7 @@ struct SystemUnavailableOverlay: View {
                 NSPasteboard.general.setString(error.copyText, forType: .string)
             }
         } message: { error in
-            Text(error.detail)
+            Text(LocalizedStringKey(error.detail))
         }
     }
 }

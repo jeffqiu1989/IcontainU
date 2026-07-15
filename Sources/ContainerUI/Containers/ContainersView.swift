@@ -102,10 +102,11 @@ struct ContainersView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { container in
-            Text(
-                container.status == .running
-                    ? "\(container.id) is running. It will be force deleted."
-                    : "\(container.id) will be permanently removed.")
+            if container.status == .running {
+                Text("\(container.id) is running. It will be force deleted.")
+            } else {
+                Text("\(container.id) will be permanently removed.")
+            }
         }
     }
 

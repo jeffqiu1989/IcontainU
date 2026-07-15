@@ -306,7 +306,7 @@ struct MCPView: View {
             }
     }
 
-    private func field<Content: View>(label: String, @ViewBuilder _ content: () -> Content) -> some View {
+    private func field<Content: View>(label: LocalizedStringKey, @ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 8) {
             Text(label)
                 .font(.callout.weight(.medium))

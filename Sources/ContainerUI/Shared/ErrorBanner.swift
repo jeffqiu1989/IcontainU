@@ -49,11 +49,11 @@ struct ErrorBanner: View {
                 .font(.caption)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.callout.weight(.semibold))
                     .textSelection(.enabled)
                 if !detail.isEmpty {
-                    Text(detail)
+                    Text(LocalizedStringKey(detail))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)

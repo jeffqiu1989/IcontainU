@@ -279,7 +279,7 @@ final class MachinesModel {
             // server-side `.exists` race catch — one local so the two can't drift.
             let alreadyExistsError = OperationError(
                 title: "Machine already exists",
-                detail: "A machine named \"\(id)\" already exists. Boot it from the list, or delete it first.")
+                detail: String(localized: "A machine named \"\(id)\" already exists. Boot it from the list, or delete it first."))
             let alreadyExists = machines.contains { $0.id == id }
             if alreadyExists {
                 lastError = alreadyExistsError
