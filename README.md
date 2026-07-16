@@ -232,3 +232,5 @@ Quick start from a client config (`.mcp.json`):
 Licensed under the Apache License 2.0 — see [LICENSE](LICENSE). Built on Apple's `container` and `containerization`; see [NOTICE](NOTICE) for attribution.
 
 Developed with the assistance of vibe coding (AI-assisted development).
+
+Thanks to the [LINUX DO](https://linux.do) community for providing a platform for communication and learning.
