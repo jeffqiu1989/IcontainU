@@ -231,3 +231,5 @@ IcontainU 内置的 [Model Context Protocol](https://modelcontextprotocol.io) se
 基于 Apache License 2.0 开源 —— 见 [LICENSE](LICENSE)。基于 Apple 的 `container` 和 `containerization` 构建；见 [NOTICE](NOTICE) 的归属说明。
 
 在 vibe coding（AI 辅助开发）的协助下完成开发。
+
+感谢 [LINUX DO](https://linux.do) 社区提供的交流与学习平台。
