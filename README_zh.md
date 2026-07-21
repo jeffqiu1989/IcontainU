@@ -64,7 +64,7 @@ container system status   # 应报告: running
 
 ## 下载与安装
 
-从 [Releases](../../releases) 下载 `IcontainU-v0.2.0.zip`，解压后将 `IcontainU.app` 移到 Applications。
+从 [Releases](../../releases) 下载 `IcontainU-v0.4.0.zip`，解压后将 `IcontainU.app` 移到 Applications。
 
 未公证 —— 首次启动请右键 → 打开，或运行：
 
@@ -84,7 +84,7 @@ swift build && swift run IcontainU
 
 ## 状态与已知限制
 
-**0.2.0** —— 早期版本，但日常使用已足够。
+**0.4.0** —— 早期版本，但日常使用已足够。
 
 - `Shell` 打开系统 Terminal.app —— 尚未内嵌终端。
 - 系统配置在应用中**只读**；请通过 CLI 编辑。

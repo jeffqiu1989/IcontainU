@@ -63,7 +63,7 @@ Without a running `container` system the app still opens, but the sidebar stays 
 
 ## Download & install
 
-Download `IcontainU-v0.3.0.zip` from [Releases](../../releases), unzip, and move `IcontainU.app` to Applications.
+Download `IcontainU-v0.4.0.zip` from [Releases](../../releases), unzip, and move `IcontainU.app` to Applications.
 
 Not notarized — on first launch, right‑click → Open, or run:
 
@@ -84,7 +84,7 @@ swift build && swift run IcontainU
 
 ## Status & known limitations
 
-**0.3.0** — early, but useful day to day.
+**0.4.0** — early, but useful day to day.
 
 - `Shell` opens Terminal.app — no embedded terminal yet.
 - System configuration is **view‑only** in the app; edit it via the CLI.
