@@ -34,7 +34,11 @@ let package = Package(
                 .product(name: "ContainerResource", package: "container"),
                 .product(name: "ContainerPersistence", package: "container"),
                 // product `ContainerImagesService` re-exports the `ContainerImagesServiceClient` target.
+                // The latter also provides `RemoteContentStoreClient`, the `ContentStore` a build
+                // needs — so linking `ContainerBuild` (below) requires no extra product for it.
                 .product(name: "ContainerImagesService", package: "container"),
+                // Image build (Dockerfile → OCI image) via the in-process BuildKit client.
+                .product(name: "ContainerBuild", package: "container"),
                 .product(name: "TerminalProgress", package: "container"),
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationOCI", package: "containerization"),

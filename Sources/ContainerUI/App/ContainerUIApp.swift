@@ -13,6 +13,7 @@ struct ContainerUIApp: App {
     @State private var machinesModel = MachinesModel()
     @State private var networksModel = NetworksModel()
     @State private var volumesModel = VolumesModel()
+    @State private var buildsModel = BuildsModel()
 
     @State private var mcpSettings = MCPSettings()
     @State private var mcpRequestLog = MCPRequestLog()
@@ -46,6 +47,7 @@ struct ContainerUIApp: App {
                 .environment(machinesModel)
                 .environment(networksModel)
                 .environment(volumesModel)
+                .environment(buildsModel)
                 .environment(mcpServerManager)
                 .frame(minWidth: 900, minHeight: 540)
                 .onAppear {

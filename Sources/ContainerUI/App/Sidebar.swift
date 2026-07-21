@@ -7,6 +7,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
     // WORKLOADS
     case containers
     case compose
+    case build
     case machines
     // RESOURCES
     case images
@@ -23,6 +24,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
         switch self {
         case .containers: "Containers"
         case .compose: "Compose"
+        case .build: "Build"
         case .machines: "Machines"
         case .images: "Images"
         case .volumes: "Volumes"
@@ -37,6 +39,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
         switch self {
         case .containers: "shippingbox"
         case .compose: "square.stack.3d.up"
+        case .build: "hammer"
         case .machines: "server.rack"
         case .images: "opticaldiscdrive"
         case .volumes: "externaldrive"
@@ -53,6 +56,7 @@ enum SidebarItem: String, Hashable, CaseIterable, Identifiable {
         switch self {
         case .containers: Palette.containers
         case .compose: Palette.compose
+        case .build: Palette.build
         case .machines: Palette.machines
         case .images: Palette.images
         case .volumes: Palette.volumes
@@ -78,6 +82,7 @@ struct Sidebar: View {
             Section("Workloads") {
                 row(.containers)
                 row(.compose)
+                row(.build)
                 row(.machines)
             }
             Section("Resources") {

@@ -12,6 +12,7 @@ enum Palette {
     static let containers = Color.teal
     static let compose = Color.green
     static let machines = Color.brown
+    static let build = Color.mint
     static let images = Color.purple
     static let volumes = Color.orange
     static let networks = Color.blue

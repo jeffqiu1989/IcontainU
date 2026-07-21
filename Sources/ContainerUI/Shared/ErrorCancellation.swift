@@ -27,6 +27,22 @@ extension Error {
         return error.code == .cancelled || (error.cause?.isCancellation ?? false)
     }
 
+    /// A description for a build-failure banner that surfaces buildkitd's actual
+    /// reason. `localizedDescription` renders a raw `GRPCCore.RPCError` as a
+    /// generic "The operation couldn't be completed. (GRPCCore.RPCError error 1.)",
+    /// hiding the message; `RPCError` is `CustomStringConvertible`, so
+    /// `String(describing:)` yields `cancelled: "<message>"` (and a
+    /// `ContainerizationError` wrapping one folds the cause in). Only substituted
+    /// when the generic form is detected, so non-gRPC errors keep their
+    /// `localizedDescription`.
+    var buildFailureDetail: String {
+        let loc = self.localizedDescription
+        if loc.contains("GRPCCore.RPCError") {
+            return String(describing: self)
+        }
+        return loc
+    }
+
     /// True for transient image-pull failures worth an automatic retry:
     /// connect/read timeouts, connection resets. The `container` XPC clients
     /// wrap these in a `ContainerizationError` cause chain (same wrapping that

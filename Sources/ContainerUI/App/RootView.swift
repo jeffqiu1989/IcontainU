@@ -42,6 +42,8 @@ struct RootView: View {
             ContainersView()
         case .compose:
             ComposeView()
+        case .build:
+            BuildsView()
         case .machines:
             MachinesView()
         case .images:

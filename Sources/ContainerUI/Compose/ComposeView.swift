@@ -126,16 +126,8 @@ struct ComposeView: View {
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
             } else {
-                ContentUnavailableView {
-                    Label("No Projects", systemImage: "square.stack.3d.up")
-                } description: {
-                    Text("Import a compose file to bring up a group of services together.")
-                } actions: {
-                    Button("New Project") { showingImport = true }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Palette.compose)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
+                ContentUnavailableView("No Projects", systemImage: "square.stack.3d.up")
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
         } else if filteredProjects.isEmpty {
             ContentUnavailableView.search(text: searchText)

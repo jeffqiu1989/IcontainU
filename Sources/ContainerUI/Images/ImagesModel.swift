@@ -85,6 +85,11 @@ final class ImagesModel {
         // not the shortened displayReference — the backend matches the stored
         // canonical reference, so a denormalized name would not be found.
         try await ClientImage.delete(reference: image.name, garbageCollect: true)
+        // Reclaim orphaned layer snapshots left behind by delete - mirrors
+        // `container image rm`, which calls cleanUpOrphanedBlobs() after delete.
+        // Without this, deleted layers linger in the snapshot store and only a
+        // manual `container image prune` reclaims them.
+        _ = try await ClientImage.cleanUpOrphanedBlobs()
         await refresh()
     }
 
