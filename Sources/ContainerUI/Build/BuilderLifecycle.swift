@@ -137,13 +137,12 @@ enum BuilderLifecycle {
                 destination: "/var/lib/container-builder-shim/exports", options: []),
         ]
         containerConfig.rosetta = useRosetta
-        // Apply builder resources. Hardcoded generously (6 GB / 4 CPU) for now to
-        // rule out OOM while diagnosing the gRPC-stream-cancellations; the config
-        // override isn't reaching the builder because ConfigurationLoader reads
-        // appRoot, not ~/.config/container. TODO: restore config-driven values
-        // once config loading is wired to the user-editable layer.
+        // Apply the configured builder resources (cpus/memory). Without this the
+        // container falls back to Resources()'s 1 GB default, which OOMs real
+        // builds. Mirrors the CLI's BuilderStart. Defaults: 2 CPUs / 2 GB
+        // (BuildConfig.defaultCPUs / defaultMemory in containerization).
         containerConfig.resources = try Parser.resources(
-            cpus: 4, memory: "6144MB",
+            cpus: nil, memory: nil,
             defaultCPUs: config.build.cpus,
             defaultMemory: config.build.memory)
 

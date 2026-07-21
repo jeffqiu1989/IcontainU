@@ -27,6 +27,7 @@ Two things make IcontainU worth your dock:
 
 - **🐧 Machines that just work** — presets pointing at official *init‑ready* images (Alpine, Rocky UBI‑init), so machines actually boot. CPU, memory, and home‑mount are all settable.
 - **📦 Smart image pull** — pulls only your host architecture, and is registry‑mirror aware with a one‑click **DaoCloud preset** (9 registries, individually toggleable) that leaves no trace on local images.
+- **🔨 Image building** - build container images from a Dockerfile via the shared BuildKit builder, with no-cache toggle, live build log, and per-config build history.
 - **🃏 Everything on a card** — Start / Stop / Shell / Logs / Delete per container, plus a live **stats** tab and streaming logs.
 - **✨ Friction removers** — tap to copy an IP or `ip:port`, tap a mount to open it in Finder, local‑image autocomplete, and Docker‑style auto‑naming.
 - **🚀 Frictionless setup** — first launch auto‑installs the kernel and monitors `container` health for you.
@@ -88,6 +89,7 @@ swift build && swift run IcontainU
 - `Shell` opens Terminal.app — no embedded terminal yet.
 - System configuration is **view‑only** in the app; edit it via the CLI.
 - Menu bar support is under development.
+- Compose does not support `build:` - use the standalone **Build** feature to build images, then reference them by tag in `image:`.
 
 ## Compose reference
 

@@ -27,6 +27,7 @@
 
 - **🐧 开箱即用的虚拟机** —— 内置指向官方 *init 就绪镜像*的预设（Alpine、Rocky UBI‑init），机器真能启动。CPU / 内存 / home 挂载均可设置。
 - **📦 智能镜像拉取** —— 只拉当前主机架构，且支持镜像加速，一键 **DaoCloud 预设**（9 个仓库、可单独开关），且不在本地镜像上留痕。
+- **🔨 镜像构建** -- 通过共享 BuildKit builder 从 Dockerfile 构建镜像，支持 no-cache 开关、实时构建日志、按配置的构建历史。
 - **🃏 卡片式管理** —— 每个容器卡片都有 启动 / 停止 / Shell / 日志 / 删除，外加实时 **Stats** 与流式日志。
 - **✨ 消除摩擦** —— 点击复制 IP 或 `ip:port`，点击挂载在 Finder 打开，本地镜像自动补全，Docker 风格自动命名。
 - **🚀 无摩擦初始化** —— 首次启动自动安装 kernel，并持续监控 `container` 健康状态。
@@ -88,6 +89,7 @@ swift build && swift run IcontainU
 - `Shell` 打开系统 Terminal.app —— 尚未内嵌终端。
 - 系统配置在应用中**只读**；请通过 CLI 编辑。
 - 菜单栏功能正在开发中。
+- Compose 不支持 `build:` -- 用独立的**镜像构建**功能构建镜像，然后在 `image:` 里按 tag 引用。
 
 ## Compose 参考
 
